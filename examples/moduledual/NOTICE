@@ -1,19 +1,34 @@
 NOTICE — dual module (CSQTT / qWDTT)
 
-This AntiNet module combines two protocol clients in one helper binary.
+This AntiNet module ships one helper binary with two protocol clients.
+
+Distribution decision for the combined binary
+---------------------------------------------
+The published Android/desktop helper (libdualhelper.so / dual-helper) is
+offered under GNU GPL-3.0-or-later, because it links the qWDTT client.
+
+Source tree attribution (unchanged):
 
 1. CSQTT datapath and rust engine
    License: PolyForm-Noncommercial-1.0.0
-   Origin: examples/modulecsqtt / amurcanov CSQTT lineage
+   Files: examples/moduledual/.../csqtt_*.go,
+          examples/modulecsqtt/native/csqtt-engine/
+   See: examples/modulecsqtt/LICENSE
 
-2. qWDTT client datapath (internal/qwdtt)
+2. qWDTT client datapath
    License: GNU GPL-3.0-or-later
+   Files: examples/moduledual/native/dual/internal/qwdtt/
    Origin: SpaceNeuroX/proxy-turn-vk-android (go_client) and/or
            AntiNet-adapted qwdtt-module sources
+
+3. AntiNet canons and build tooling
+   License: MIT
+   Files: shared/, build.py, tools/
+   See: LICENSE (repository root)
 
 The qWDTT *server* is NOT shipped here; users run it on their VPS from
 https://github.com/SpaceNeuroX/proxy-turn-vk-android (server/).
 
-Before a public release of this combined binary, confirm distribution terms
-compatible with GPL-3.0 for the qWDTT portions (typically the combined work
-must be offered under GPL-3.0 or later, or qWDTT must be a separate artifact).
+Commercial use of CSQTT-derived code still requires a separate written
+license from the CSQTT licensor (PolyForm Noncommercial). Linking it into
+this GPL binary does not grant commercial rights to the CSQTT portions.

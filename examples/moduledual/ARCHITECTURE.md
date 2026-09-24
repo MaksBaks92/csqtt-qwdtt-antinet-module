@@ -81,18 +81,23 @@ Rules for CSQTT safety:
 | qWDTT datapath | antinet `qwdtt-module` **or** upstream `go_client/` | server stays external |
 | qWDTT server | SpaceNeuroX `server/` | deploy docs only; never in APK |
 
-## License gate (before release)
+## License gate
 
-- CSQTT engine: PolyForm-Noncommercial-1.0.0  
-- qWDTT client/server: GPL-3.0  
+- Combined helper binary: **GPL-3.0-or-later** (qWDTT client is linked in).
+- CSQTT engine sources remain PolyForm-Noncommercial-1.0.0 (attribution + commercial restriction on those portions).
+- AntiNet canons / `build.py`: MIT.
 
-Shipping both in one binary needs an explicit license decision (e.g. dual module under GPL, or keep qWDTT as optional build tag / separate artifact). Skeleton does not vendor GPL sources yet.
+Details: `examples/moduledual/NOTICE`. qWDTT server is never in the APK.
 
-## Implementation phases
+## Status (0.2.1-dual)
 
-1. **Skeleton (this commit)** — router + stubs + docs.  
-2. **Wire CSQTT** — call into existing helper/engine from `internal/csqtt` (behavior = current 1.2.x).  
-3. **Vendor qWDTT client** — datapath only; point peers at SpaceNeuroX server.  
-4. **Shared VK** — extract CSQTT VK into `internal/vk`, use from both.  
-5. **Settings / CI** — full settings lists, Android build, dual tests.  
-6. **Release** — only after license + CSQTT regression green.
+| Phase | State |
+|-------|--------|
+| 1. Skeleton / router | done |
+| 2. Wire CSQTT helper + rust engine | done |
+| 3. Vendor qWDTT client (WG + rawtun) | done |
+| 4. Shared VK hash/mode layer | done (TURN creds still path-specific) |
+| 5. Settings + Android CI | done (`Release module bundles`) |
+| 6. First GitHub Release + filled `antinet-module.json` | next |
+
+Engine sync from CSQTT `main`: `python tools/sync_csqtt_engine.py`.

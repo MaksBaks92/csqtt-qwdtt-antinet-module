@@ -7,7 +7,7 @@
   "homepage": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module",
   "updateUrl": "https://raw.githubusercontent.com/MaksBaks92/csqtt-qwdtt-antinet-module/main/antinet-module.json",
   "version": "0.2.1-dual",
-  "license": "PolyForm-Noncommercial-1.0.0 (CSQTT) + GPL-3.0-or-later (qWDTT client) — see NOTICE",
+  "license": "GPL-3.0-or-later (combined helper); CSQTT portions PolyForm-Noncommercial — see NOTICE",
   "handoverMode": "signal",
   "hostEvents": ["handover", "netlost", "netback", "stall", "dns"],
   "parallelPing": false,

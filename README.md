@@ -25,6 +25,23 @@ python build.py --bundle --module dual
 
 ## Лицензии
 
+Комбинированный helper (`libdualhelper.so` / `dual-helper`) распространяется
+под **GPL-3.0-or-later** (из‑за qWDTT). Детали и атрибуция исходников —
+`examples/moduledual/NOTICE`.
+
 - CSQTT-ветка / rust engine: PolyForm Noncommercial — `examples/modulecsqtt/LICENSE`
-- qWDTT client: GPL-3.0-or-later — см. `examples/moduledual/NOTICE`
+- qWDTT client: GPL-3.0-or-later — `internal/qwdtt`
 - Каноны AntiNet (`shared/`, `build.py`): MIT — корневой `LICENSE`
+
+Коммерческое использование CSQTT-части по-прежнему требует отдельной лицензии
+у правообладателя CSQTT (PolyForm NC).
+
+## Синхрон rust engine с CSQTT
+
+```bash
+python tools/sync_csqtt_engine.py
+# или: python tools/sync_csqtt_engine.py --from D:/csqtt/csqtt-antinet-module
+```
+
+Копирует `examples/modulecsqtt/native/csqtt-engine` из соседнего
+[csqtt-antinet-module](https://github.com/MaksBaks92/csqtt-antinet-module) (`main`).
