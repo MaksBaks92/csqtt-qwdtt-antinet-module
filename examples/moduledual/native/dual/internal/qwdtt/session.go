@@ -472,7 +472,12 @@ func RunSession(
 			return false, fmt.Errorf("DTLS client: %w", dtlsErr)
 		}
 
-		hctx, hcancel := context.WithTimeout(sessCtx, 50*time.Second)
+		// Handshake budget must stay under relayWatchdogTick (15s): with the old 50s
+		// timeout, handshakeSem(3) held slots until watchdog cancelled the whole run —
+		// no fail LOG ever appeared, just «transport never established». Align with
+		// canping path (15s) but leave ~3s headroom so HS errors surface before FIRE.
+		const dtlsHandshakeBudget = 12 * time.Second
+		hctx, hcancel := context.WithTimeout(sessCtx, dtlsHandshakeBudget)
 		log.Printf("[WORKER #%d] [DTLS] Handshake...", sessionID)
 		hsErr := dtlsConn.HandshakeContext(hctx)
 		hcancel()
@@ -485,6 +490,11 @@ func RunSession(
 				if strings.Contains(errStr, "deadline") || strings.Contains(errStr, "timeout") {
 					return false, fmt.Errorf("WRAP_AUTH_TIMEOUT: DTLS timeout, password/WRAP not confirmed")
 				}
+			}
+			errStr := strings.ToLower(hsErr.Error())
+			if strings.Contains(errStr, "deadline") || strings.Contains(errStr, "timeout") ||
+				strings.Contains(errStr, "context canceled") || strings.Contains(errStr, "context deadline") {
+				return false, fmt.Errorf("DTLS handshake: %w (peer may only speak rawtun on :56003 — switch connMode to Raw IP)", hsErr)
 			}
 			return false, fmt.Errorf("DTLS handshake: %w", hsErr)
 		}

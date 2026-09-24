@@ -184,8 +184,8 @@ func Run(configContent, resolversPath, profileDir, protectPath string, listenFd 
 	// стояло, роняло запрошенные 16 до 9 (floor к кратному 9) и молчало, то есть ссылка с
 	// `workers=16` поднимала 9 TURN-релеев вместо 16.
 	//
-	// Верхний потолок оставлен: `cfg.Workers` приходит из ССЫЛКИ, а не из флага CLI, как у автора,
-	// и ничем иным число relay-аллокаций не ограничено.
+	// Верхний потолок оставлен: `cfg.Workers` = SETTING_workers > LINK workers= > defaultWorkers
+	// (см. parseHelperConfig); ничем иным число relay-аллокаций не ограничено.
 	numW := cfg.Workers
 	if numW > maxWorkers {
 		log.Printf("[SETTINGS] workers %d -> %d (upper cap)", cfg.Workers, maxWorkers)

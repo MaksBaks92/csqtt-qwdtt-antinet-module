@@ -297,6 +297,7 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 	var cfg helperConfig
 	var link string
 	var settingHashRaw []string
+	var settingWorkers int // SETTING_workers — перекрывает workers= из ссылки (0 = не задано)
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		eq := strings.IndexByte(line, '=')
@@ -331,6 +332,11 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 			cfg.DirectPort, _ = strconv.Atoi(v)
 		case "SETTING_rawPort":
 			cfg.RawPort, _ = strconv.Atoi(v)
+		case "SETTING_workers":
+			// UI «Воркеры» для обеих схем. Приоритет: SETTING > LINK > defaultWorkers.
+			if w, e := strconv.Atoi(strings.TrimSpace(v)); e == nil && w > 0 {
+				settingWorkers = w
+			}
 		case "SETTING_dialTimeoutSec":
 			// antinet: потолок дозвона SOCKS5 до цели (socks5.go). 0/пусто → дефолт 10с.
 			cfg.DialTimeoutSec, _ = strconv.Atoi(v)
@@ -378,9 +384,14 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 		return cfg, fmt.Errorf("no VK hashes (LINK hashes= or SETTING_vkHash1..4)")
 	}
 	hashes = strings.Join(merged, ",")
+	// Workers: SETTING_workers (UI) > LINK workers=/workersPerHash= > defaultWorkers.
+	// Раньше читали только ссылку — UI «Воркеры» с schemes:["csqtt"] до qWDTT не доезжал.
 	cfg.Workers = defaultWorkers
 	if w, e := strconv.Atoi(qget("workers", "workersPerHash")); e == nil && w > 0 {
 		cfg.Workers = w
+	}
+	if settingWorkers > 0 {
+		cfg.Workers = settingWorkers
 	}
 	// 0 = эфемерный bind (`run.go`: `127.0.0.1:0`), и это ДЕФОЛТ. Раньше здесь
 	// безусловно проставлялся `defaultLocalPort` (9000), из-за чего эфемерная ветка была
