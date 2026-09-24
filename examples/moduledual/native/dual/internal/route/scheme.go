@@ -14,8 +14,12 @@ const (
 )
 
 // FromLink returns the protocol scheme embedded in a raw LINK (csqtt://… or qwdtt://…).
+// For multi-line moduleCall args (canping: link\nprofileDir\nstateBlob) only the first line is used.
 func FromLink(link string) (Scheme, error) {
 	link = strings.TrimSpace(link)
+	if i := strings.IndexByte(link, '\n'); i >= 0 {
+		link = strings.TrimSpace(link[:i])
+	}
 	low := strings.ToLower(link)
 	switch {
 	case strings.HasPrefix(low, "csqtt://"):

@@ -19,17 +19,26 @@ func moduleCall(verb, arg string) string {
 	arg = strings.TrimSpace(arg)
 	scheme, err := route.FromLink(arg)
 	if err != nil {
-		if verb == "normalize" {
+		// Import / opaque text: try both parsers (MODULE_API §2.2 normalize/summarize).
+		switch verb {
+		case "normalize":
 			if out := qwdtt.Call("normalize", arg); out != "" {
 				return out
 			}
 			return csqttCall("normalize", arg)
-		}
-		if verb == "summarize" {
+		case "summarize":
 			if out := qwdtt.Call("summarize", arg); out != "" {
 				return out
 			}
 			return csqttCall("summarize", arg)
+		case "canping":
+			if out := qwdtt.Call("canping", arg); out == "ok" {
+				return "ok"
+			}
+			if out := csqttCall("canping", arg); out == "ok" {
+				return "ok"
+			}
+			return "no"
 		}
 		return ""
 	}

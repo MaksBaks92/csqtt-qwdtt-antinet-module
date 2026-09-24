@@ -24,10 +24,8 @@ jobs:
         run: python build.py --test --module dual -y
 
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust Android targets
-        run: |
-          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
       - name: Android NDK
         uses: nttld/setup-ndk@v1
@@ -35,18 +33,21 @@ jobs:
         with:
           ndk-version: r27d
 
-      - name: Build Android ABIs + release bundles
+      - name: Build Android ABIs
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
-        run: |
-          set -euo pipefail
-          python build.py --os android --module dual --abis all -y
-          python build.py --bundle --module dual
+        run: python build.py --os android --module dual --abis all -y
+
+      - name: Build Linux desktop helper
+        run: python build.py --os linux --module dual --arch amd64 -y
+
+      - name: Bundle release zips + manifest skeleton
+        run: python build.py --bundle --module dual
 
       - name: Upload dist-release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dual-android-dist-release
+          name: dual-dist-release
           path: examples/moduledual/dist-release/
           if-no-files-found: error
 
@@ -56,12 +57,13 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          overwrite_files: false
-          fail_on_unmatched_files: true
+          overwrite_files: true
+          fail_on_unmatched_files: false
           body: |
-            Dual AntiNet module (CSQTT + qWDTT). Android ABI zips.
-            Install into AntiNet `modules/dual/`.
-            Schemes: `csqtt://`, `qwdtt://`, `wdtt://`.
+            Dual AntiNet module — one helper, two protocols (`csqtt://` + `qwdtt://` / `wdtt://`).
+            One active LINK per session (AntiNet multi-scheme); both schemes ship in the same zip.
+            qWDTT: WireGuard (`vpn`) and Raw IP (`rawtun`, needs `-listen-raw` on VPS).
+            License: GPL-3.0-or-later for the combined helper — see NOTICE.
           files: |
-            examples/moduledual/dist-release/*-android-*.zip
+            examples/moduledual/dist-release/*.zip
             examples/moduledual/dist-release/antinet-module.json

@@ -12,6 +12,8 @@ func TestFromLink(t *testing.T) {
 		{"CSQTT://x", SchemeCSQTT, true},
 		{"qwdtt://peer", SchemeQWDTT, true},
 		{"wdtt://legacy", SchemeQWDTT, true},
+		{"csqtt://host\n/profile\nblob", SchemeCSQTT, true},
+		{"qwdtt://config?hashes=abc\n/p\n", SchemeQWDTT, true},
 		{"https://nope", "", false},
 		{"", "", false},
 	}

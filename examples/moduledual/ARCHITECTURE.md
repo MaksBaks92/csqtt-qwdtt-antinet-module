@@ -89,7 +89,7 @@ Rules for CSQTT safety:
 
 Details: `examples/moduledual/NOTICE`. qWDTT server is never in the APK.
 
-## Status (0.2.1-dual)
+## Status (0.2.2-dual)
 
 | Phase | State |
 |-------|--------|
@@ -97,7 +97,8 @@ Details: `examples/moduledual/NOTICE`. qWDTT server is never in the APK.
 | 2. Wire CSQTT helper + rust engine | done |
 | 3. Vendor qWDTT client (WG + rawtun) | done |
 | 4. Shared VK hash/mode layer | done (TURN creds still path-specific) |
-| 5. Settings + Android CI | done (`Release module bundles`) |
-| 6. First GitHub Release + filled `antinet-module.json` | done (`v0.2.1-dual`) |
+| 5. Settings + Android/Linux CI | done |
+| 6. GitHub Release + `antinet-module.json` | done (`v0.2.1-dual`; bump on each tag) |
+| 7. `canping` for both schemes (`pingNeedsConsent`) | done |
 
 Engine sync from CSQTT `main`: `python tools/sync_csqtt_engine.py`.

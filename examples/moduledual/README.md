@@ -10,14 +10,15 @@
 | `csqtt://…` | gVisor + rust CSQTT engine (`csqtt_*.go` + `rustDir`) | CSQTT WIRE-3 |
 | `qwdtt://…` / `wdtt://…` | vendored client (`internal/qwdtt`, GPL) | VPS SpaceNeuroX `server/` |
 
-## Статус `0.2.1-dual`
+## Статус `0.2.2-dual`
 
-- Роутер по `LINK` в `cmd/helper/main.go`
+- Роутер по `LINK` в `cmd/helper/main.go` (оба протокола в одном helper)
 - CSQTT-ветка: полный helper (`csqtt_*.go`) + rust engine
-- qWDTT-ветка: клиент `internal/qwdtt` (GPL)
-- **Общий VK-слой** `internal/vk`: режимы hash/auth (политика CSQTT) + сбор хешей из settings/link для обеих веток
+- qWDTT-ветка: клиент `internal/qwdtt` (GPL) — WireGuard + rawtun
+- **Общий VK-слой** `internal/vk`: режимы hash/auth + сбор хешей
+- `canping` / `summarize` / `normalize` для обеих схем (`pingNeedsConsent`)
 - TURN-креды по-прежнему раздельно (rust CSQTT / GetCreds qWDTT)
-- `go build ./cmd/helper` с inject — OK
+- `go test` + Android/Linux CI — OK
 
 Сервер qWDTT **не** в бандле.
 

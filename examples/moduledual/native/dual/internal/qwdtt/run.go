@@ -14,10 +14,9 @@ import (
 	"strings"
 )
 
-// moduleCall — parse-only сабкоманды контракта (MODULE_API §2.2). ОДНА реализация на обе формы
+// Call — parse-only сабкоманды контракта (MODULE_API §2.2). ОДНА реализация на обе формы
 // доставки: канон `shared/entry` зовёт её из argv на десктопе и из `antinet_module_call` в
-// Android-слоте (запускать .so ради парсинга ссылки нельзя — это библиотека, не процесс).
-// `canping` не объявлен (`pingNeedsConsent` в дескрипторе нет) — хост его не спрашивает.
+// Android-слоте. dual module.json объявляет pingNeedsConsent → canping обязателен.
 func Call(verb, arg string) string {
 	switch verb {
 	case "summarize":
@@ -25,8 +24,56 @@ func Call(verb, arg string) string {
 		return name + "\n" + server
 	case "normalize":
 		return normalizeQwdtt(arg)
+	case "canping":
+		return canPingQwdtt(arg)
 	}
 	return ""
+}
+
+// canPingQwdtt — «можно ли пинговать без UI?» (MODULE_API §2.2). ok, если в ссылке уже есть
+// VK-хеши (или восстановленный MODULE_STATE намекает на сохранённые креды).
+func canPingQwdtt(arg string) string {
+	lines := strings.SplitN(arg, "\n", 3)
+	link := ""
+	if len(lines) > 0 {
+		link = strings.TrimSpace(lines[0])
+	}
+	if link == "" {
+		return "no"
+	}
+	low := strings.ToLower(link)
+	if !strings.HasPrefix(low, "qwdtt://") && !strings.HasPrefix(low, "wdtt://") {
+		return "no"
+	}
+	if i := strings.Index(link, "?"); i >= 0 {
+		q := link[i+1:]
+		for _, part := range strings.Split(q, "&") {
+			kv := strings.SplitN(part, "=", 2)
+			if len(kv) != 2 {
+				continue
+			}
+			k := strings.ToLower(strings.TrimSpace(kv[0]))
+			v := strings.TrimSpace(kv[1])
+			if v == "" {
+				continue
+			}
+			if k == "hashes" || k == "vkhashes" {
+				return "ok"
+			}
+		}
+	}
+	if strings.HasPrefix(low, "wdtt://") {
+		// legacy wdtt://ip:dtls:wg:local:pass:hash — hash is required field
+		parts := strings.Split(link[len("wdtt://"):], ":")
+		if len(parts) >= 6 && strings.TrimSpace(strings.Join(parts[5:], ":")) != "" {
+			return "ok"
+		}
+	}
+	if len(lines) > 2 && strings.TrimSpace(lines[2]) != "" {
+		// Non-empty MODULE_STATE: may hold restored TURN creds (credstate).
+		return "ok"
+	}
+	return "no"
 }
 
 // hostListenFd — слушающий SOCKS5-сокет, отданный хостом (MODULE_API §2.6). <=0 = хост его не
