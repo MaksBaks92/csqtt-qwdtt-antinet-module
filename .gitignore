@@ -22,3 +22,5 @@ __pycache__/
 *.pyc
 *.exe
 .DS_Store
+
+_release_tmp/
