@@ -9,7 +9,7 @@
 | `csqtt://…` | gVisor + rust CSQTT engine | CSQTT WIRE-3 |
 | `qwdtt://…` / `wdtt://…` | vendored client (`internal/qwdtt`, GPL) | VPS qWDTT |
 
-Версия модуля: см. `examples/moduledual/module.json` (`0.2.3-dual`).
+Версия модуля: см. `examples/moduledual/module.json` (`0.2.4-dual`).
 
 Один helper обслуживает **оба** протокола (multi-scheme AntiNet). За сессию активна
 одна `LINK=` — `csqtt://` или `qwdtt://`; смена схемы = новый конфиг/переподключение.

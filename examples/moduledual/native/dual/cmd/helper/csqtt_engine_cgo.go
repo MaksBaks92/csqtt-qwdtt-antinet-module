@@ -348,6 +348,10 @@ func androidModuleDir() string {
 	if runtime.GOOS != "android" {
 		return ""
 	}
+	// Host loads the helper via dlopen from files/modules/<id>/; os.Executable is
+	// the JVM process path (/system/bin/...), so find the mapped helper .so.
+	// Dual ships libdualhelper.so; keep libcsqtthelper.so for older/solo builds.
+	names := []string{"libdualhelper.so", "libcsqtthelper.so"}
 	f, err := os.Open("/proc/self/maps")
 	if err != nil {
 		return ""
@@ -357,13 +361,14 @@ func androidModuleDir() string {
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
-		idx := strings.Index(line, "libcsqtthelper.so")
-		if idx < 0 {
-			continue
-		}
-		path := strings.TrimSpace(line[strings.LastIndex(line, " ")+1:])
-		if strings.HasSuffix(path, "libcsqtthelper.so") {
-			return filepath.Dir(path)
+		for _, name := range names {
+			if !strings.Contains(line, name) {
+				continue
+			}
+			path := strings.TrimSpace(line[strings.LastIndex(line, " ")+1:])
+			if strings.HasSuffix(path, name) {
+				return filepath.Dir(path)
+			}
 		}
 	}
 	return ""
