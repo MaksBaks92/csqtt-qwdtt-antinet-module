@@ -24,3 +24,5 @@ __pycache__/
 .DS_Store
 
 _release_tmp/
+
+_latest_art/
