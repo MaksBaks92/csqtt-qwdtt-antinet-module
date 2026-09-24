@@ -98,6 +98,6 @@ Details: `examples/moduledual/NOTICE`. qWDTT server is never in the APK.
 | 3. Vendor qWDTT client (WG + rawtun) | done |
 | 4. Shared VK hash/mode layer | done (TURN creds still path-specific) |
 | 5. Settings + Android CI | done (`Release module bundles`) |
-| 6. First GitHub Release + filled `antinet-module.json` | next |
+| 6. First GitHub Release + filled `antinet-module.json` | done (`v0.2.1-dual`) |
 
 Engine sync from CSQTT `main`: `python tools/sync_csqtt_engine.py`.
