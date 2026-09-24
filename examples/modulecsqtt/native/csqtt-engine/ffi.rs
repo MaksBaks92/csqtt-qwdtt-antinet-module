@@ -55,6 +55,9 @@ struct EngineJson {
     idle_workers: Option<usize>,
     #[serde(default)]
     idle_after_secs: Option<u64>,
+    /// Same-socket selective FEC. Absent/`true` → on (official client).
+    #[serde(default = "default_true")]
+    fec_duplicate: bool,
     /// Optional TURN seeds from the dual Go helper (shared GetCreds / qWDTT cache).
     #[serde(default)]
     turn_seed: Vec<TurnSeedJson>,
