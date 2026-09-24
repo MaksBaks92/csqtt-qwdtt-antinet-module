@@ -1,0 +1,19 @@
+NOTICE — dual module (CSQTT / qWDTT)
+
+This AntiNet module combines two protocol clients in one helper binary.
+
+1. CSQTT datapath and rust engine
+   License: PolyForm-Noncommercial-1.0.0
+   Origin: examples/modulecsqtt / amurcanov CSQTT lineage
+
+2. qWDTT client datapath (internal/qwdtt)
+   License: GNU GPL-3.0-or-later
+   Origin: SpaceNeuroX/proxy-turn-vk-android (go_client) and/or
+           AntiNet-adapted qwdtt-module sources
+
+The qWDTT *server* is NOT shipped here; users run it on their VPS from
+https://github.com/SpaceNeuroX/proxy-turn-vk-android (server/).
+
+Before a public release of this combined binary, confirm distribution terms
+compatible with GPL-3.0 for the qWDTT portions (typically the combined work
+must be offered under GPL-3.0 or later, or qWDTT must be a separate artifact).

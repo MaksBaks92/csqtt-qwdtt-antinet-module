@@ -1,0 +1,251 @@
+{
+  "apiVersion": 1,
+  "schemes": ["csqtt", "qwdtt"],
+  "names": ["CSQTT", "qWDTT"],
+  "name": "CSQTT / qWDTT",
+  "description": "Два протокола в одном модуле: csqtt:// → сервер CSQTT (WIRE-3), qwdtt:// → VPS qWDTT (WG/raw). Общий слой VK-хешей/TURN. Серверы разные.",
+  "homepage": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module",
+  "updateUrl": "https://raw.githubusercontent.com/MaksBaks92/csqtt-qwdtt-antinet-module/main/antinet-module.json",
+  "version": "0.2.1-dual",
+  "license": "PolyForm-Noncommercial-1.0.0 (CSQTT) + GPL-3.0-or-later (qWDTT client) — see NOTICE",
+  "handoverMode": "signal",
+  "hostEvents": ["handover", "netlost", "netback", "stall", "dns"],
+  "parallelPing": false,
+  "pingNeedsConsent": true,
+  "pingTimeoutSec": 90,
+  "pingWhileConnected": true,
+  "socks5": true,
+  "dnsResolver": true,
+  "relayWindowSec": 15,
+  "settings": [
+    {
+      "key": "dialTimeoutSec",
+      "type": "int",
+      "label": "Таймаут дозвона (сек)",
+      "default": 20,
+      "min": 1,
+      "max": 120,
+      "description": "Потолок dial до цели внутри туннеля (обе схемы)."
+    },
+    {
+      "key": "hashMode",
+      "type": "enum",
+      "label": "Режим хешей VK",
+      "default": "manual",
+      "description": "CSQTT-ветка: Ручной / Авто API / Авто ВК. qWDTT пока использует хеши из ссылки + свои режимы VK ниже.",
+      "options": [
+        { "value": "manual", "label": "Ручной" },
+        { "value": "auto_api", "label": "Авто API (CSQTT)" },
+        { "value": "auto_js", "label": "Авто ВК (CSQTT)" }
+      ]
+    },
+    {
+      "key": "vkAuthMode",
+      "type": "enum",
+      "label": "Режим кредов / VK auth",
+      "default": "vkcalls",
+      "description": "CSQTT: Авто / Авто ВК / Капча. qWDTT: anonymous≈Авто, account≈вход в VK (см. опции).",
+      "options": [
+        { "value": "vkcalls", "label": "Авто (VK Calls)" },
+        { "value": "auto_js", "label": "Авто ВК (CSQTT)" },
+        { "value": "legacy", "label": "Капча (CSQTT)" },
+        { "value": "anonymous", "label": "Анонимно (qWDTT)" },
+        { "value": "account", "label": "Через VK-аккаунт (qWDTT)" }
+      ]
+    },
+    {
+      "key": "vkHash1",
+      "type": "string",
+      "label": "VK-хеш 1",
+      "default": "",
+      "description": "Для CSQTT (hashMode=manual) и запасной для qWDTT."
+    },
+    {
+      "key": "vkHash2",
+      "type": "string",
+      "label": "VK-хеш 2",
+      "default": "",
+      "description": "Необязательно."
+    },
+    {
+      "key": "vkHash3",
+      "type": "string",
+      "label": "VK-хеш 3",
+      "default": "",
+      "description": "Необязательно."
+    },
+    {
+      "key": "vkHash4",
+      "type": "string",
+      "label": "VK-хеш 4",
+      "default": "",
+      "description": "Необязательно."
+    },
+    {
+      "key": "workers",
+      "type": "enum",
+      "label": "Воркеры CSQTT",
+      "default": "18",
+      "description": "Только csqtt://. Кратно 9.",
+      "options": [
+        { "value": "9", "label": "9 (1 хеш)" },
+        { "value": "18", "label": "18 (2 хеша)" },
+        { "value": "27", "label": "27 (3 хеша)" },
+        { "value": "36", "label": "36 (4 хеша)" },
+        { "value": "54", "label": "54 (6 хешей)" },
+        { "value": "72", "label": "72 (8 хешей)" }
+      ]
+    },
+    {
+      "key": "idleWorkers",
+      "type": "int",
+      "label": "CSQTT воркеров в простое",
+      "default": 2,
+      "min": 0,
+      "max": 72,
+      "description": "Только csqtt://. 0 — выключить deep idle."
+    },
+    {
+      "key": "idleAfterSec",
+      "type": "int",
+      "label": "CSQTT простой через (сек)",
+      "default": 180,
+      "min": 30,
+      "max": 3600,
+      "description": "Только csqtt://."
+    },
+    {
+      "key": "obfs",
+      "type": "enum",
+      "label": "Обфускация CSQTT",
+      "default": "audio",
+      "description": "Только csqtt://.",
+      "options": [
+        { "value": "audio", "label": "Audio" },
+        { "value": "video", "label": "Video" }
+      ]
+    },
+    {
+      "key": "turnTransport",
+      "type": "enum",
+      "label": "TURN CSQTT",
+      "default": "udp",
+      "description": "Только csqtt://. TCP — если режут UDP.",
+      "options": [
+        { "value": "udp", "label": "UDP" },
+        { "value": "tcp_tls", "label": "TCP" }
+      ]
+    },
+    {
+      "key": "fecDuplicate",
+      "type": "bool",
+      "label": "FEC мелкого UDP (CSQTT)",
+      "default": true,
+      "description": "Только csqtt://."
+    },
+    {
+      "key": "deviceId",
+      "type": "string",
+      "label": "Device ID",
+      "default": "",
+      "description": "Пусто — HWID AntiNet. Общий для привязки пароля на серверах."
+    },
+    {
+      "key": "captchaMode",
+      "type": "enum",
+      "label": "Капча VK (qWDTT)",
+      "default": "auto",
+      "description": "В основном qwdtt://; CSQTT капча идёт через свой путь.",
+      "options": [
+        { "value": "auto", "label": "Авто" },
+        { "value": "rjs", "label": "Go → webview" },
+        { "value": "wv", "label": "Только webview" }
+      ]
+    },
+    {
+      "key": "vkAnonPath",
+      "type": "enum",
+      "label": "Анонимный путь VK (qWDTT)",
+      "default": "vkcalls",
+      "description": "Только qwdtt://.",
+      "options": [
+        { "value": "vkcalls", "label": "VK Calls" },
+        { "value": "legacy", "label": "Legacy token" }
+      ]
+    },
+    {
+      "key": "dnsPreset",
+      "type": "enum",
+      "label": "DNS для VK (qWDTT)",
+      "default": "yandex",
+      "description": "Только цепочка подключения qWDTT, не туннельный DNS.",
+      "options": [
+        { "value": "yandex", "label": "Яндекс" },
+        { "value": "cloudflare", "label": "Cloudflare" },
+        { "value": "google", "label": "Google" },
+        { "value": "doh-cloudflare", "label": "Cloudflare DoH" },
+        { "value": "doh-google", "label": "Google DoH" }
+      ]
+    },
+    {
+      "key": "connMode",
+      "type": "enum",
+      "label": "Транспорт qWDTT",
+      "default": "vpn",
+      "description": "Только qwdtt://. Raw IP требует -listen-raw на VPS.",
+      "options": [
+        { "value": "vpn", "label": "WireGuard" },
+        { "value": "rawtun", "label": "Raw IP" }
+      ]
+    },
+    {
+      "key": "noDtls",
+      "type": "bool",
+      "label": "Без DTLS (qWDTT)",
+      "default": false,
+      "description": "Только qwdtt://. Нужен -listen-direct на сервере."
+    },
+    {
+      "key": "turnTcp",
+      "type": "bool",
+      "label": "TURN по TCP (qWDTT)",
+      "default": false,
+      "description": "Только qwdtt://."
+    },
+    {
+      "key": "directPort",
+      "type": "int",
+      "label": "Порт без DTLS (qWDTT)",
+      "default": 56002,
+      "min": 1,
+      "max": 65535,
+      "description": "Только если «Без DTLS»."
+    },
+    {
+      "key": "rawPort",
+      "type": "int",
+      "label": "Порт Raw IP (qWDTT)",
+      "default": 56003,
+      "min": 1,
+      "max": 65535,
+      "description": "Только режим Raw IP."
+    },
+    {
+      "key": "debugLog",
+      "type": "bool",
+      "label": "Подробный лог",
+      "default": false,
+      "description": "Диагностика (в основном CSQTT gVisor/bridge)."
+    }
+  ],
+  "helperBinary": {
+    "android": "libdualhelper.so",
+    "desktop": "dual-helper"
+  },
+  "build": {
+    "goDir": "native/dual",
+    "goPkg": "./cmd/helper",
+    "ldflags": "-checklinkname=0",
+    "rustDir": "../modulecsqtt/native/csqtt-engine"
+  }
+}
