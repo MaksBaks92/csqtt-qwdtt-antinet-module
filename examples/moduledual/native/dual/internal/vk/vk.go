@@ -1,11 +1,8 @@
 // Package vk — shared VK hash / mode layer for the dual module.
 //
 // Base: CSQTT AntiNet policy (hashMode ↔ vkAuthMode, manual hashes from settings).
-// TURN credential fetch stays path-specific:
-//   - csqtt:// → rust engine (vkcalls / captcha)
-//   - qwdtt:// → internal/qwdtt.GetCreds
-//
-// This package unifies *which hashes and which VK modes* both branches use.
+// TURN credentials: process-wide seed cache (`PutTurn` / `LookupTurn`) filled by qWDTT GetCreds
+// and/or CSQTT prefetch; CSQTT rust engine accepts `turn_seed` in start JSON.
 package vk
 
 import (

@@ -58,6 +58,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"dual-antinet/internal/vk"
 )
 
 // ── Таймаут дозвона SOCKS5 до цели (см. socks5.go) ──────────────────────────────────────────────
@@ -254,6 +256,20 @@ func LoadRestoredCreds(blobB64, link, startReason string) {
 	_ = os.Stdout.Sync()
 }
 
+// publishTurnSeed mirrors restored/fresh creds into the dual-wide vk cache (csqtt can seed rust).
+func publishTurnSeed(hash string, c TurnCredentials, expUnix int64) {
+	if hash == "" {
+		return
+	}
+	vk.PutTurn(vk.TurnSeed{
+		Hash:        hash,
+		Username:    c.Username,
+		Password:    c.Password,
+		ServerAddrs: append([]string(nil), c.ServerAddrs...),
+		ExpiresUnix: expUnix,
+	})
+}
+
 // takeRestoredCreds — забрать восстановленные креды под конкретную ссылку. Одноразово: после
 // первого использования они уже лежат в обычном stream-кэше, и второй раз подменять его не надо.
 func takeRestoredCreds(link string) (TurnCredentials, bool) {
@@ -276,6 +292,7 @@ func takeRestoredCreds(link string) (TurnCredentials, bool) {
 	restoredCredsUnproven.Store(true)
 	log.Printf("[VK Auth] MODULE_STATE: creds applied to the call (hash-fp %s) - VK chain skipped",
 		credsLinkFingerprint(link))
+	publishTurnSeed(link, c, c.ExpiresAt.Unix())
 	return c, true
 }
 
@@ -305,6 +322,7 @@ func SaveCredsToHost(c TurnCredentials) {
 	if err != nil {
 		return
 	}
+	publishTurnSeed(c.Link, c, expUnix)
 	fmt.Printf("STATE_SAVE|%s\n", base64.StdEncoding.EncodeToString(body))
 	_ = os.Stdout.Sync()
 }

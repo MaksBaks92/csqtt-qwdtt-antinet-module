@@ -9,11 +9,24 @@
 | `csqtt://…` | gVisor + rust CSQTT engine | CSQTT WIRE-3 |
 | `qwdtt://…` / `wdtt://…` | vendored client (`internal/qwdtt`, GPL) | VPS qWDTT |
 
-Версия модуля: см. `examples/moduledual/module.json` (`0.2.2-dual`).
+Версия модуля: см. `examples/moduledual/module.json` (`0.2.3-dual`).
 
 Один helper обслуживает **оба** протокола (multi-scheme AntiNet). За сессию активна
 одна `LINK=` — `csqtt://` или `qwdtt://`; смена схемы = новый конфиг/переподключение.
 Оба datapath и общие настройки VK живут в одном бандле.
+
+## Настройки по схемам
+
+В `module.json` у части settings есть поле `schemes: ["csqtt"]` или `["qwdtt"]`
+(например `connMode` / raw только для qWDTT). Хост AntiNet, который читает `schemes`,
+скрывает чужие контролы на карточке конфига. Общие ключи (`vkHash*`, `vkAuthMode`,
+`dialTimeoutSec`, …) без `schemes` — видны обеим схемам.
+
+## Общие TURN-креды
+
+`internal/vk` держит process-wide кэш TURN; qWDTT `GetCreds` пишет туда.
+CSQTT перед стартом rust-движка делает prefetch через тот же `GetCreds` и передаёт
+`turn_seed` в engine JSON — движок не ходит в VK повторно для уже полученных хешей.
 
 ## Сборка
 

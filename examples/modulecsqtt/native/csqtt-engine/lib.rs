@@ -36,6 +36,7 @@ mod tun;
 mod turn;
 mod turn_core;
 mod turn_endpoint;
+mod turn_seed;
 mod turn_stream;
 mod udp_batch;
 mod vk_js_calls;

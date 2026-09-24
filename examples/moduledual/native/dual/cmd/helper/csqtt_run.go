@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"dual-antinet/internal/qwdtt"
 	"dual-antinet/internal/vk"
 	"dual-antinet/tunnel"
 
@@ -536,6 +537,9 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 	// Missing setting → engine default (2 / 180 s); explicit 0 workers → off.
 	idleWorkers, idleAfterSec := idleSettings(cfg, workers)
 
+	// Shared TURN seeds: prefetch via qWDTT GetCreds (same VK Calls path) into rust turn_seed.
+	turnSeeds := prefetchSharedTurnSeeds(cfg, protectPath, hashes, authMode, s)
+
 	search := []string{profileDir}
 	if profileDir != "" {
 		search = append(search, filepath.Dir(profileDir), filepath.Dir(filepath.Dir(profileDir)))
@@ -585,6 +589,10 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 	}
 	if allowRedistrib {
 		engineJSON["allow_hash_redistribution"] = true
+	}
+	if len(turnSeeds) > 0 {
+		engineJSON["turn_seed"] = turnSeeds
+		emitLog("CSQTT: shared TURN seed count=%d (qWDTT GetCreds → rust)", len(turnSeeds))
 	}
 	engineCfg, _ := json.Marshal(engineJSON)
 
@@ -1200,4 +1208,37 @@ func looksLikeVkToken(s string) bool {
 		return false
 	}
 	return true
+}
+
+// prefetchSharedTurnSeeds fills rust turn_seed via qWDTT GetCreds (dual-shared VK TURN).
+func prefetchSharedTurnSeeds(cfg map[string]string, protectPath string, hashes []string, authMode string, s csqttStrings) []map[string]any {
+	_ = s
+	mode := strings.ToLower(strings.TrimSpace(authMode))
+	switch mode {
+	case "auto_js", "legacy":
+		var hits []map[string]any
+		for _, h := range hashes {
+			if seed, ok := vk.LookupTurn(h); ok {
+				hits = append(hits, map[string]any{
+					"hash": seed.Hash, "username": seed.Username, "password": seed.Password,
+					"server_addrs": seed.ServerAddrs,
+				})
+			}
+		}
+		return hits
+	}
+	qwdtt.PrepareSharedAuth(
+		protectPath,
+		cfg["SETTING_dnsPreset"],
+		cfg["SETTING_captchaMode"],
+		authMode,
+		cfg["SETTING_vkAnonPath"],
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), qwdtt.PrefetchBudget)
+	defer cancel()
+	seeds := qwdtt.PrefetchTurnSeeds(ctx, hashes)
+	if len(seeds) > 0 {
+		emitLog("CSQTT: prefetched %d/%d TURN creds via shared GetCreds", len(seeds), len(hashes))
+	}
+	return seeds
 }

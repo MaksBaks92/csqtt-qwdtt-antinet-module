@@ -120,6 +120,12 @@ impl VkAuth {
     }
 
     pub async fn get_credentials(&self, link: &str, stream_id: usize) -> Result<TurnCredentials> {
+        if let Some(seeded) = crate::turn_seed::lookup(link) {
+            crate::log_error!(
+                "[STREAM {stream_id}] [VK Auth] using dual-shared TURN seed for hash"
+            );
+            return Ok(seeded);
+        }
         if self.mode.as_ref() == "auto_js" {
             let credential_id = stream_id / 100;
             let auto_js_result = match self.auto_js.as_ref() {

@@ -55,9 +55,21 @@ struct EngineJson {
     idle_workers: Option<usize>,
     #[serde(default)]
     idle_after_secs: Option<u64>,
-    /// Same-socket selective FEC. Absent/`true` → on (official client).
-    #[serde(default = "default_true")]
-    fec_duplicate: bool,
+    /// Optional TURN seeds from the dual Go helper (shared GetCreds / qWDTT cache).
+    #[serde(default)]
+    turn_seed: Vec<TurnSeedJson>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+struct TurnSeedJson {
+    #[serde(default)]
+    hash: String,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    password: String,
+    #[serde(default)]
+    server_addrs: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -85,6 +97,15 @@ fn arguments_from_json(raw: &str) -> Result<Arguments, String> {
         return Err("vk hashes are required".into());
     }
     let workers = if cfg.workers == 0 { 18 } else { cfg.workers };
+    crate::turn_seed::clear();
+    for seed in &cfg.turn_seed {
+        crate::turn_seed::install(
+            &seed.hash,
+            &seed.username,
+            &seed.password,
+            &seed.server_addrs,
+        );
+    }
     Ok(Arguments {
         turn: String::new(),
         port: String::new(),
