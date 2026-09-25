@@ -119,6 +119,9 @@ type StreamCredentialsCache struct {
 }
 
 const (
+	// credentialLifetime — ТОЛЬКО fallback, если TURN-username не разобрался как
+	// `<unix-expiry>:<id>`. Нормальный горизонт кэша = VK-expiry − запас (~часы),
+	// см. credsCacheExpiresAt в credstate.go. Короткий TTL раньше гонял капчу каждые ~9 мин.
 	credentialLifetime = 10 * time.Minute
 	cacheSafetyMargin  = 60 * time.Second
 	maxCacheErrors     = 3
@@ -298,7 +301,7 @@ func getVkCredsCached(ctx context.Context, link string, streamID int) (string, s
 		Username:    user,
 		Password:    pass,
 		ServerAddrs: addrs,
-		ExpiresAt:   time.Now().Add(credentialLifetime - cacheSafetyMargin),
+		ExpiresAt:   credsCacheExpiresAt(user),
 		Link:        link,
 	}
 	// antinet §4.2 — отдать свежие креды хосту НЕПРОЗРАЧНЫМ блобом (credstate.go). На каждом
@@ -368,7 +371,7 @@ func storeLastCredsByLink(link, user, pass string, addrs []string) TurnCredentia
 		Username:    user,
 		Password:    pass,
 		ServerAddrs: cloneStringSlice(addrs),
-		ExpiresAt:   time.Now().Add(credentialLifetime - cacheSafetyMargin),
+		ExpiresAt:   credsCacheExpiresAt(user),
 		Link:        strings.TrimSpace(link),
 	}
 	lastCredsByLink[tc.Link] = tc

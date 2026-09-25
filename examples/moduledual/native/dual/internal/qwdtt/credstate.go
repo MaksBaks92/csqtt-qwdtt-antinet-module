@@ -26,25 +26,16 @@ package qwdtt
 // осознанный размен — секрет на диске хуже одной лишней авторизации после того, как юзер сам убил
 // приложение.
 //
-// СРОК ГОДНОСТИ — наш, не хоста (§4.1 п.4), но БЕРЁТСЯ ИЗ САМИХ КРЕДОВ, а не из кэш-политики.
+// СРОК ГОДНОСТИ — наш, не хоста (§4.1 п.4), и берётся ИЗ САМИХ КРЕДОВ.
 //
-// Прежняя редакция брала тот же `ExpiresAt`, что и in-memory кэш (`credentialLifetime` − запас,
-// т.е. 9 минут ОТ МОМЕНТА АВТОРИЗАЦИИ), со ссылкой на живой замер «работает и на 18-й минуте».
-// Живой прогон показал, что этого не просто мало — этого почти всегда НЕ ХВАТАЕТ:
-// `kill -9` слота на 11-й минуте сессии → блоб уже протух → полная VK-цепочка. То есть §4.2
-// («полное восстановление») не срабатывал ровно в самом частом своём сценарии.
+// VK выдаёт TURN-username вида `<unix-expiry>:<id>` (RFC 5766 §10.2). Живой замер: наш старый
+// in-memory горизонт был 9 минут от авторизации, а VK-expiry из username — ещё ~8 часов.
+// Хост-блоб (§4.2) уже жил по VK-сроку; in-memory кэш догонял его через credsCacheExpiresAt —
+// иначе живой процесс каждые ~9 минут снова гнал VK-цепочку и капчу, хотя TURN-креды ещё валидны.
 //
-// Настоящий срок годности лежит В САМОМ КРЕДЕ: VK выдаёт TURN-username вида `<unix-expiry>:<id>`
-// (RFC 5766 §10.2 ephemeral credentials). Замер того же прогона: наш `e` = 19:37:18 UTC, а
-// VK-шный expiry из username = 03:28:19 UTC СЛЕДУЮЩЕГО дня — **7 ч 51 мин** реальной годности
-// против наших 9 минут. Мы выбрасывали креды, живые ещё почти восемь часов, и гоняли юзера через
-// авторизацию (а при неудаче — через капчу) на ровном месте.
-//
-// Теперь: `e` = VK-expiry − запас, если username разобрался; иначе прежний консервативный
-// fallback. Плюс гигиенический потолок по возрасту (`AcquiredUnix`) — не пытаться поднимать
-// заведомо древний секрет и не держать его в памяти хоста вечно. Валидность в конечном счёте
-// решает TURN-сервер: если креды всё же не приняты, `group.go::refreshCreds` (уже нагруженный
-// путь, отрабатывает на каждом respawn'е релея) переполучает их реактивно.
+// Fallback на короткий credentialLifetime — только если username не разобрался. Плюс гигиенический
+// потолок по возрасту блоба (`AcquiredUnix`). Валидность в конечном счёте решает TURN-сервер:
+// если креды всё же не приняты, `group.go::refreshCreds` переполучает их реактивно.
 
 import (
 	"encoding/base64"
@@ -141,6 +132,25 @@ func vkTurnCredExpiry(username string) (time.Time, bool) {
 	return time.Unix(sec, 0), true
 }
 
+// credsCacheExpiresAt — горизонт in-memory кэша TURN-кредов (и lastCredsByLink, и restored).
+//
+// Раньше всегда ставили `now + credentialLifetime − запас` (~9 мин). Хост уже переживал
+// resume по VK-expiry (~8 ч), а живой процесс каждые ~9 минут снова шёл в getAnonymousToken
+// → капча / ACTION_REQUIRED на ровном месте. Берём тот же VK-expiry − запас; fallback —
+// прежние 9 минут, если username не разобрался.
+func credsCacheExpiresAt(username string) time.Time {
+	fallback := time.Now().Add(credentialLifetime - cacheSafetyMargin)
+	vkExp, ok := vkTurnCredExpiry(username)
+	if !ok {
+		return fallback
+	}
+	exp := vkExp.Add(-vkCredExpirySafetyMargin)
+	if !time.Now().Before(exp) {
+		return fallback
+	}
+	return exp
+}
+
 func credsLinkFingerprint(link string) string {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(strings.TrimSpace(link)))
@@ -229,12 +239,9 @@ func LoadRestoredCreds(blobB64, link, startReason string) {
 			time.Since(exp).Truncate(time.Second))
 		return
 	}
-	// ExpiresAt ЗДЕСЬ — поле in-memory кэша, т.е. «когда проактивно перезапросить», а НЕ «когда
-	// креды умрут». Ставим тот же горизонт, что у свежего фетча (credentialLifetime − запас),
-	// но не дальше реального VK-срока. Без этого восстановленная запись оказывалась «просроченной»
-	// для кэша в ту же секунду, и каждый следующий стрим всё равно шёл в полную цепочку — вторая,
-	// более тихая половина того же бага.
-	cacheExp := time.Now().Add(credentialLifetime - cacheSafetyMargin)
+	// ExpiresAt — тот же горизонт, что у свежего фетча: VK-expiry − запас (см. credsCacheExpiresAt).
+	// Раньше сюда клали ~9 мин и после takeRestoredCreds кэш снова требовал полную VK-цепочку.
+	cacheExp := credsCacheExpiresAt(pc.Username)
 	if cacheExp.After(exp) {
 		cacheExp = exp
 	}
@@ -302,14 +309,9 @@ func SaveCredsToHost(c TurnCredentials) {
 	if c.Username == "" || len(c.ServerAddrs) == 0 {
 		return
 	}
-	// Годность блоба — РЕАЛЬНАЯ, из самого креда (см. шапку файла): VK кладёт unix-expiry префиксом
-	// в TURN-username. `c.ExpiresAt` тут НЕ подходит — это горизонт in-memory кэша (9 минут от
-	// авторизации), из-за которого §4.2 не срабатывал в самом частом сценарии. Fallback на прежнее
-	// значение — только если username не разобрался (чужой формат / смена схемы на стороне VK).
-	expUnix := c.ExpiresAt.Unix()
-	if vkExp, ok := vkTurnCredExpiry(c.Username); ok {
-		expUnix = vkExp.Add(-vkCredExpirySafetyMargin).Unix()
-	}
+	// Годность блоба = VK-expiry − запас (тот же горизонт, что in-memory кэш после
+	// credsCacheExpiresAt). Раньше ExpiresAt был ~9 мин, а сюда подставляли VK-срок отдельно.
+	expUnix := credsCacheExpiresAt(c.Username).Unix()
 	body, err := json.Marshal(persistedCreds{
 		LinkFP:       stateLinkFP(),                // ссылка МОДУЛЯ (см. развёрнутый коммент выше)
 		HashFP:       credsLinkFingerprint(c.Link), // c.Link здесь = VK-хеш звонка, а не ссылка

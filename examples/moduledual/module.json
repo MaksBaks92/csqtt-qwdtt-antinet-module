@@ -12,7 +12,7 @@
   "description": "Два протокола в одном модуле: csqtt:// → сервер CSQTT (WIRE-3), qwdtt:// → VPS qWDTT (WG/raw). Общий слой VK-хешей/TURN. Серверы разные.",
   "homepage": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module",
   "updateUrl": "https://raw.githubusercontent.com/MaksBaks92/csqtt-qwdtt-antinet-module/main/antinet-module.json",
-  "version": "0.2.7-dual",
+  "version": "0.2.8-dual",
   "license": "GPL-3.0-or-later (combined helper); CSQTT portions PolyForm-Noncommercial — see NOTICE",
   "handoverMode": "signal",
   "hostEvents": [

@@ -727,7 +727,7 @@ func runTransportSupervised(rootCtx context.Context, tp *TurnParams, peer *net.U
 
 	// Транспорт TURN/DTLS-воркеров под СУПЕРВИЗОРОМ — пере-спавним в ДВУХ случаях (оба → re-spawn
 	// `runTransport` с НОВЫМИ TURN-сокетами на ТЕКУЩЕЙ сети через protectedDialUDP→protect-callback
-	// хоста, переиспользуя in-memory кэш VK-кредов 10мин → БЕЗ капчи, пока креды валидны; WG-device/
+	// хоста, переиспользуя in-memory кэш VK-кредов (VK-expiry ≈ часы) → БЕЗ капчи, пока креды валидны; WG-device/
 	// dispatcher/SOCKS на 127.0.0.1 НЕ трогаются — переживают, WG не ре-handshake, dispatcher.Shutdown
 	// НЕ закрывает localConn):
 	//   (1) ХЕНДОВЕР — событие `handover` от хоста (MODULE_API §2.8; C-ABI на Android, stdin на
@@ -952,7 +952,7 @@ func debugSilenceWatcher(profileDir string) {
 // релея end-to-end: релей форвардит → handshake завершается; мёртв → «did not complete» каждые ~5с.
 // idle-safe (нет трафика → нет попыток handshake → нет ложняка), быстрый (~15с = 3 фейла). На stuck →
 // НЕМЕДЛЕННЫЙ supervisor re-spawn (txCancel, БЕЗ ядрового per-worker retry-delay 5-16с): свежие
-// TURN/DTLS-сокеты на ТЕКУЩЕЙ сети → новые NAT-мэппинги + свежий TURN Allocate, реюз кэша кредов 10мин
+// TURN/DTLS-сокеты на ТЕКУЩЕЙ сети → новые NAT-мэппинги + свежий TURN Allocate, реюз кэша кредов (VK-expiry)
 // → без капчи; WG/dispatcher/SOCKS переживают. Мирор AWG handshakeStuckThreshold→Reconnect
 // ([[project_amneziawg_integration]]): порог подряд → reconnect, reset на «Received handshake response»,
 // cooldown + cap-на-выгорание.
