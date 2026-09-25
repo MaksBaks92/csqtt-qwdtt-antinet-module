@@ -163,11 +163,15 @@ func getStreamCache(streamID int) *StreamCredentialsCache {
 
 func (c *StreamCredentialsCache) invalidate(streamID int) {
 	c.mutex.Lock()
+	link := c.creds.Link
 	c.creds = TurnCredentials{}
 	c.mutex.Unlock()
 
 	c.errorCount.Store(0)
 	c.lastErrorTime.Store(0)
+	if link != "" {
+		invalidateLastCredsByLink(link)
+	}
 
 	log.Printf("[STREAM %d] [VK Auth] Credentials cache invalidated", streamID)
 }
@@ -248,6 +252,26 @@ func getVkCredsCached(ctx context.Context, link string, streamID int) (string, s
 	}
 	cache.mutex.RUnlock()
 
+	// Чужой cache-слот / предыдущий fetch уже получил креды на этот же hash — не открываем
+	// капчу/auth снова (G2 при одном хеше, prefetch vs group, и т.п.).
+	if shared, ok := findCachedCredsByLink(link); ok {
+		cache.mutex.Lock()
+		cache.creds = shared
+		cache.mutex.Unlock()
+		log.Printf("[STREAM %d] [VK Auth] Reusing credentials from another cache slot (link=%s..., urls=%d)", streamID, shortLink(link), len(shared.ServerAddrs))
+		return shared.Username, shared.Password, cloneStringSlice(shared.ServerAddrs), nil
+	}
+	vkRequestMu.Lock()
+	if shared, ok := peekLastCredsByLink(link); ok {
+		vkRequestMu.Unlock()
+		cache.mutex.Lock()
+		cache.creds = shared
+		cache.mutex.Unlock()
+		log.Printf("[STREAM %d] [VK Auth] Reusing credentials from last-fetch map (link=%s..., urls=%d)", streamID, shortLink(link), len(shared.ServerAddrs))
+		return shared.Username, shared.Password, cloneStringSlice(shared.ServerAddrs), nil
+	}
+	vkRequestMu.Unlock()
+
 	cache.mutex.Lock()
 	defer cache.mutex.Unlock()
 
@@ -284,16 +308,88 @@ func getVkCredsCached(ctx context.Context, link string, streamID int) (string, s
 	return user, pass, cloneStringSlice(addrs), nil
 }
 
+// findCachedCredsByLink — любой непросроченный cache-слот с тем же VK-hash.
+// TryRLock: вызывается и из-под cache.mutex.Lock() (fetchVkCredsSerialized) — свой слот
+// просто пропускаем, иначе дедлок на нереентерабельном RWMutex.
+func findCachedCredsByLink(link string) (TurnCredentials, bool) {
+	link = strings.TrimSpace(link)
+	if link == "" {
+		return TurnCredentials{}, false
+	}
+	now := time.Now()
+	credentialsStore.mu.RLock()
+	defer credentialsStore.mu.RUnlock()
+	for _, c := range credentialsStore.caches {
+		if !c.mutex.TryRLock() {
+			continue
+		}
+		ok := c.creds.Link == link && now.Before(c.creds.ExpiresAt) && len(c.creds.ServerAddrs) > 0
+		if !ok {
+			c.mutex.RUnlock()
+			continue
+		}
+		out := TurnCredentials{
+			Username:    c.creds.Username,
+			Password:    c.creds.Password,
+			ServerAddrs: cloneStringSlice(c.creds.ServerAddrs),
+			ExpiresAt:   c.creds.ExpiresAt,
+			Link:        c.creds.Link,
+		}
+		c.mutex.RUnlock()
+		return out, true
+	}
+	return TurnCredentials{}, false
+}
+
 // ─── Serialized (throttled) fetcher ───
 
 var (
 	vkRequestMu           sync.Mutex
 	globalLastVkFetchTime time.Time
+	// lastCredsByLink — креды по VK-hash под vkRequestMu: пока A ещё держит cache.mutex
+	// после fetch, B уже может взять vkRequestMu и обязан увидеть чужой результат без
+	// повторного ACTION_REQUIRED.
+	lastCredsByLink = map[string]TurnCredentials{}
 )
+
+func peekLastCredsByLink(link string) (TurnCredentials, bool) {
+	link = strings.TrimSpace(link)
+	c, ok := lastCredsByLink[link]
+	if !ok || time.Now().After(c.ExpiresAt) || len(c.ServerAddrs) == 0 {
+		return TurnCredentials{}, false
+	}
+	out := c
+	out.ServerAddrs = cloneStringSlice(c.ServerAddrs)
+	return out, true
+}
+
+func storeLastCredsByLink(link, user, pass string, addrs []string) TurnCredentials {
+	tc := TurnCredentials{
+		Username:    user,
+		Password:    pass,
+		ServerAddrs: cloneStringSlice(addrs),
+		ExpiresAt:   time.Now().Add(credentialLifetime - cacheSafetyMargin),
+		Link:        strings.TrimSpace(link),
+	}
+	lastCredsByLink[tc.Link] = tc
+	return tc
+}
+
+func invalidateLastCredsByLink(link string) {
+	link = strings.TrimSpace(link)
+	vkRequestMu.Lock()
+	delete(lastCredsByLink, link)
+	vkRequestMu.Unlock()
+}
 
 func fetchVkCredsSerialized(ctx context.Context, link string, streamID int) (string, string, []string, error) {
 	vkRequestMu.Lock()
 	defer vkRequestMu.Unlock()
+
+	if shared, ok := peekLastCredsByLink(link); ok {
+		log.Printf("[STREAM %d] [VK Auth] Reusing credentials after queue wait (link=%s..., urls=%d)", streamID, shortLink(link), len(shared.ServerAddrs))
+		return shared.Username, shared.Password, cloneStringSlice(shared.ServerAddrs), nil
+	}
 
 	// Throttle: 3-6 seconds between requests
 	minInterval := 3*time.Second + time.Duration(rand.Intn(3000))*time.Millisecond
@@ -309,11 +405,13 @@ func fetchVkCredsSerialized(ctx context.Context, link string, streamID int) (str
 		}
 	}
 
-	defer func() {
-		globalLastVkFetchTime = time.Now()
-	}()
-
-	return fetchVkCreds(ctx, link, streamID)
+	user, pass, addrs, err := fetchVkCreds(ctx, link, streamID)
+	globalLastVkFetchTime = time.Now()
+	if err != nil {
+		return "", "", nil, err
+	}
+	storeLastCredsByLink(link, user, pass, addrs)
+	return user, pass, cloneStringSlice(addrs), nil
 }
 
 // ─── Main credential fetcher (rotates through stable credential sets) ───
@@ -491,6 +589,9 @@ func getTokenChain(ctx context.Context, link string, streamID int, creds VKCrede
 	var token2 string
 	var savedProfile *SavedProfile
 	savedProfile, _ = LoadProfileFromDisk()
+	// После одного интерактивного WBV (юзер уже решил капчу в WebView) повторный ACTION_REQUIRED
+	// почти никогда не помогает: VK отверг success_token → новая капча → ещё один диалог. Стоп.
+	interactiveCaptchaDone := false
 
 	for attempt := 0; ; attempt++ {
 		resp, err = doRequest(data, urlAddr)
@@ -506,13 +607,17 @@ func getTokenChain(ctx context.Context, link string, streamID int, creds VKCrede
 
 			captchaErr := parseVkCaptchaError(errObj)
 			if captchaErr != nil && captchaErr.RedirectURI != "" && captchaErr.SessionToken != "" {
-				if attempt >= 3 {
-					log.Printf("[STREAM %d] [Captcha] Max attempts reached", streamID)
+				if attempt >= 3 || interactiveCaptchaDone {
+					if interactiveCaptchaDone {
+						log.Printf("[STREAM %d] [Captcha] VK still rejected after interactive WebView solve — not showing captcha again", streamID)
+					} else {
+						log.Printf("[STREAM %d] [Captcha] Max attempts reached", streamID)
+					}
 					globalCaptchaLockout.Store(time.Now().Add(60 * time.Second).Unix())
 					return "", "", nil, fmt.Errorf("CAPTCHA_WAIT_REQUIRED")
 				}
 
-				successToken, solveErr := solveCaptchaBySelectedMode(ctx, streamID, attempt+1, captchaErr, client, profile, savedProfile)
+				successToken, usedInteractive, solveErr := solveCaptchaBySelectedMode(ctx, streamID, attempt+1, captchaErr, client, profile, savedProfile)
 				if solveErr != nil {
 					if errors.Is(solveErr, errCaptchaSessionExpired) {
 						log.Printf("[STREAM %d] [CAPTCHA] session exhausted - requesting a new captcha from VK", streamID)
@@ -524,6 +629,9 @@ func getTokenChain(ctx context.Context, link string, streamID int, creds VKCrede
 					log.Printf("[STREAM %d] [Captcha] Solve failed: %v", streamID, solveErr)
 					globalCaptchaLockout.Store(time.Now().Add(60 * time.Second).Unix())
 					return "", "", nil, fmt.Errorf("CAPTCHA_WAIT_REQUIRED")
+				}
+				if usedInteractive {
+					interactiveCaptchaDone = true
 				}
 
 				captchaAttempt := captchaErr.CaptchaAttempt
@@ -619,6 +727,8 @@ func markCaptchaSessionExpired(streamID int) error {
 	return errCaptchaSessionExpired
 }
 
+// solveCaptchaBySelectedMode returns (token, usedInteractiveWebView, err).
+// usedInteractiveWebView=true means an ACTION_REQUIRED dialog was shown; caller must not open another.
 func solveCaptchaBySelectedMode(
 	ctx context.Context,
 	streamID int,
@@ -627,7 +737,7 @@ func solveCaptchaBySelectedMode(
 	client tlsclient.HttpClient,
 	profile Profile,
 	savedProfile *SavedProfile,
-) (string, error) {
+) (string, bool, error) {
 	if fresh, err := rotateCaptchaProfile(); err == nil {
 		savedProfile = fresh
 	} else {
@@ -637,26 +747,29 @@ func solveCaptchaBySelectedMode(
 	switch getCaptchaMode() {
 	case "wv":
 		log.Printf("[STREAM %d] [CAPTCHA] WBV: mode from Android settings (attempt %d)", streamID, attempt)
-		return requestWebViewCaptcha(streamID, captchaErr, "selected", captchaSelectedWebViewTimeout)
+		token, err := requestWebViewCaptcha(streamID, captchaErr, "selected", captchaSelectedWebViewTimeout)
+		return token, true, err
 	case "rjs":
 		log.Printf("[STREAM %d] [CAPTCHA] RJS: Go v2 selected in settings (attempt %d)", streamID, attempt)
 		token, solveErr := solveVkCaptchaV2Attempts(ctx, captchaErr, client, profile, savedProfile, 2)
 		if solveErr == nil {
-			return token, nil
+			return token, false, nil
 		}
 		if ctx.Err() != nil {
-			return "", solveErr
+			return "", false, solveErr
 		}
 		if isCaptchaSessionDead(solveErr) {
 			log.Printf("[STREAM %d] [CAPTCHA] RJS: captcha session is dead, requesting a new one from VK", streamID)
-			return "", markCaptchaSessionExpired(streamID)
+			return "", false, markCaptchaSessionExpired(streamID)
 		}
 		if isCaptchaSessionExhausted(solveErr) {
 			log.Printf("[STREAM %d] [CAPTCHA] RJS: rate limit, falling back to WBV Auto", streamID)
-			return requestWebViewCaptcha(streamID, captchaErr, "auto", captchaAutoWebViewTimeout)
+			token, err := requestWebViewCaptcha(streamID, captchaErr, "auto", captchaAutoWebViewTimeout)
+			return token, true, err
 		}
 		log.Printf("[STREAM %d] [CAPTCHA] RJS: error, falling back to WBV Auto: %v", streamID, solveErr)
-		return requestWebViewCaptcha(streamID, captchaErr, "auto", captchaAutoWebViewTimeout)
+		token, err := requestWebViewCaptcha(streamID, captchaErr, "auto", captchaAutoWebViewTimeout)
+		return token, true, err
 	}
 
 	log.Printf("[STREAM %d] [CAPTCHA] AUTO: chain start (captcha attempt %d)", streamID, attempt)
@@ -664,69 +777,51 @@ func solveCaptchaBySelectedMode(
 	token, solveErr := solveVkCaptchaV2Attempts(ctx, captchaErr, client, profile, savedProfile, 2)
 	if solveErr == nil {
 		log.Printf("[STREAM %d] [CAPTCHA] AUTO: Go v2 solved the captcha", streamID)
-		return token, nil
+		return token, false, nil
 	}
 	if ctx.Err() != nil {
-		return "", solveErr
+		return "", false, solveErr
 	}
 	lastErr := solveErr
 	if isCaptchaSessionDead(solveErr) {
 		log.Printf("[STREAM %d] [CAPTCHA] AUTO: captcha session is dead, requesting a new one from VK", streamID)
-		return "", markCaptchaSessionExpired(streamID)
+		return "", false, markCaptchaSessionExpired(streamID)
 	}
 	if errors.Is(solveErr, errCaptchaV2RateLimit) || strings.Contains(strings.ToLower(solveErr.Error()), "rate limit") {
 		log.Printf("[STREAM %d] [CAPTCHA] AUTO: rate limit on Go v2, trying WBV", streamID)
 	}
 	log.Printf("[STREAM %d] [CAPTCHA] AUTO: Go v2 did not solve it in 2 attempts: %v", streamID, solveErr)
 
-	for wbvAttempt := 1; wbvAttempt <= 2; wbvAttempt++ {
-		log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV Auto attempt %d/2 (timeout %s)", streamID, wbvAttempt, captchaAutoWebViewTimeout)
-		token, solveErr = requestWebViewCaptcha(streamID, captchaErr, "auto", captchaAutoWebViewTimeout)
-		if solveErr == nil {
-			log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV Auto solved the captcha", streamID)
-			return token, nil
-		}
-		if ctx.Err() != nil {
-			return "", solveErr
-		}
-		lastErr = solveErr
-		if isWebViewCaptchaTimeout(solveErr) {
-			log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV Auto timeout %d/2", streamID, wbvAttempt)
-		} else {
-			log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV Auto error %d/2: %v", streamID, wbvAttempt, solveErr)
-		}
-
-		timer := time.NewTimer(time.Duration(250+rand.Intn(250)) * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return "", ctx.Err()
-		case <-timer.C:
-		}
+	// Один WebView на всю цепочку: раньше было 2× auto + manual = до 3 ACTION_REQUIRED подряд.
+	log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV attempt (timeout %s)", streamID, captchaAutoWebViewTimeout)
+	token, solveErr = requestWebViewCaptcha(streamID, captchaErr, "auto", captchaAutoWebViewTimeout)
+	if solveErr == nil {
+		log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV solved the captcha", streamID)
+		return token, true, nil
+	}
+	if ctx.Err() != nil {
+		return "", true, solveErr
+	}
+	lastErr = solveErr
+	if isWebViewCaptchaTimeout(solveErr) {
+		log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV timeout, final Go v2 attempt", streamID)
+	} else {
+		log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV error: %v; final Go v2 attempt", streamID, solveErr)
 	}
 
-	log.Printf("[STREAM %d] [CAPTCHA] AUTO: final Go v2 attempt after WBV", streamID)
 	token, solveErr = solveVkCaptchaV2Attempts(ctx, captchaErr, client, profile, savedProfile, 1)
 	if solveErr == nil {
 		log.Printf("[STREAM %d] [CAPTCHA] AUTO: final Go v2 solved the captcha", streamID)
-		return token, nil
+		return token, true, nil // WBV already shown once
 	}
 	if ctx.Err() != nil {
-		return "", solveErr
+		return "", true, solveErr
 	}
-	lastErr = solveErr
 	log.Printf("[STREAM %d] [CAPTCHA] AUTO: final Go v2 error: %v", streamID, solveErr)
-
-	log.Printf("[STREAM %d] [CAPTCHA] AUTO: auto-chain failed, opening manual WebView", streamID)
-	token, solveErr = requestWebViewCaptcha(streamID, captchaErr, "manual", captchaManualWebViewTimeout)
-	if solveErr == nil {
-		log.Printf("[STREAM %d] [CAPTCHA] AUTO: manual WebView solved the captcha", streamID)
-		return token, nil
-	}
 	if lastErr != nil {
-		return "", fmt.Errorf("automatic captcha chain failed: %w; manual fallback failed: %v", lastErr, solveErr)
+		return "", true, fmt.Errorf("automatic captcha chain failed: %w; final Go v2: %v", lastErr, solveErr)
 	}
-	return "", solveErr
+	return "", true, solveErr
 }
 
 // requestWebViewCaptcha — ручное решение VK-капчи через WebView/webview ХОСТА (AntiNet interactive-action,

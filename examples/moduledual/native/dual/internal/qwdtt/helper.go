@@ -518,11 +518,15 @@ type qwdttStrings struct {
 	// `-listen-direct`, и оба по умолчанию выключены; обычный DTLS-слушатель знает только
 	// GETCONF:/AUTH:). Без этой строки юзер видел только «модуль не запустился».
 	configNoAnswerFmt string // %s — режим транспорта (LOG|)
+	// WRAP/DTLS так и не встал НИ РАЗУ (peer молчит на :56002, при этом rawtun на :56003
+	// часто жив). Отдельная строка от wrapNotConfirmed: тост — «проверьте пароль», LOG —
+	// конкретный peer + совет переключить транспорт, иначе юзер ждёт ~95с host probe.
+	wrapNoAnswerFmt string // %s — peer host:port (LOG|)
 }
 
 var qwdttStringsRU = qwdttStrings{
 	wrongPassword:       "Ошибка: неверный пароль подключения",
-	wrapNotConfirmed:    "Сервер не подтвердил пароль (WRAP/DTLS) — проверьте пароль или сервер недоступен",
+	wrapNotConfirmed:    "Сервер не ответил на WRAP/DTLS — попробуйте транспорт «Raw IP» или проверьте WG-порт",
 	vkDnsUnreachable:    "Ошибка: VK DNS недоступен",
 	solvingCaptcha:      "Решаю капчу VK…",
 	vkAccessObtained:    "Доступ к звонку VK получен",
@@ -538,6 +542,7 @@ var qwdttStringsRU = qwdttStrings{
 	relaySpawnFmt:       "relayWatchdog: пересоздание #%d (причина: %s)",
 	relayGaveUpFmt:      "relayWatchdog: сдался после %d пересозданий (причина: %s)",
 	configNoAnswerFmt:   "Сервер не ответил на запрос конфига в режиме «%s». Скорее всего этот режим на адресе из ссылки не включён — у сервера под него отдельный порт. Верните транспорт в «WireGuard» либо возьмите ссылку с портом нужного режима.",
+	wrapNoAnswerFmt:     "Сервер %s не ответил на WRAP/DTLS (WireGuard). На этом порту, похоже, нет DTLS-слушателя — переключите транспорт на «Raw IP» (обычно :56003) или включите WG/DTLS на сервере.",
 	transportRawFmt:     "Транспорт: Raw IP — сырые пакеты без WireGuard, сервер %s",
 	transportDirectFmt:  "Транспорт: WireGuard без DTLS, сервер %s",
 	transportDtlsFmt:    "Транспорт: WireGuard поверх DTLS, сервер %s",
@@ -545,7 +550,7 @@ var qwdttStringsRU = qwdttStrings{
 
 var qwdttStringsEN = qwdttStrings{
 	wrongPassword:       "Error: wrong connection password",
-	wrapNotConfirmed:    "Server did not confirm the password (WRAP/DTLS) — check the password or the server is down",
+	wrapNotConfirmed:    "Server did not answer WRAP/DTLS — try \"Raw IP\" transport or check the WG port",
 	vkDnsUnreachable:    "Error: VK DNS unreachable",
 	solvingCaptcha:      "Solving VK captcha…",
 	vkAccessObtained:    "VK call access obtained",
@@ -561,6 +566,7 @@ var qwdttStringsEN = qwdttStrings{
 	relaySpawnFmt:       "relayWatchdog: re-spawn #%d (reason: %s)",
 	relayGaveUpFmt:      "relayWatchdog: gave up after %d re-spawns (reason: %s)",
 	configNoAnswerFmt:   "The server did not answer the config request in \"%s\" mode. Most likely that mode is not enabled on the address from the link — the server listens for it on a separate port. Switch the transport back to \"WireGuard\", or use a link with the port for that mode.",
+	wrapNoAnswerFmt:     "Server %s did not answer WRAP/DTLS (WireGuard). That port likely has no DTLS listener — switch transport to \"Raw IP\" (usually :56003) or enable WG/DTLS on the server.",
 	transportRawFmt:     "Transport: Raw IP — bare packets without WireGuard, server %s",
 	transportDirectFmt:  "Transport: WireGuard without DTLS, server %s",
 	transportDtlsFmt:    "Transport: WireGuard over DTLS, server %s",
@@ -1071,6 +1077,29 @@ func reportConfigNoAnswer(tp *TurnParams, err error) {
 		mode = "vpn + noDtls"
 	}
 	emitLog(qwS.configNoAnswerFmt, mode)
+}
+
+// wrapNoAnswerReported — отказ WRAP/DTLS на холодном старте печатается и гасит модуль ОДИН раз.
+// Без этого 18 воркеров × 12с HS + relayWatchdog re-spawn держали бы host probe ~90с при мёртвом :56002.
+var wrapNoAnswerReported atomic.Bool
+
+// reportWrapNoAnswer — fail-fast: peer молчит на WRAP/DTLS (типично WG-порт без слушателя, а
+// rawtun на соседнем порту жив). Зовётся из session при WRAP_AUTH_TIMEOUT, пока транспорт ещё
+// ни разу не встал. После первого установления — только обычный worker error / watchdog.
+func reportWrapNoAnswer(peer string) {
+	if transportEverEstablished.Load() {
+		return
+	}
+	if !wrapNoAnswerReported.CompareAndSwap(false, true) {
+		return
+	}
+	if peer == "" {
+		peer = "?"
+	}
+	emitProgress("%s", qwS.wrapNotConfirmed)
+	emitLog(qwS.wrapNoAnswerFmt, peer)
+	emitStatus(statusFatal, "WRAP/DTLS unanswered")
+	shutdownModule("WRAP/DTLS unanswered on cold start")
 }
 
 // configRequestBudgetFor — то же окно RELAY_WINDOW_SEC, но как потолок ожидания ответа на запрос

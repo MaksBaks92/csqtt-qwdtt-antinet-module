@@ -60,14 +60,18 @@ func WorkerGroup(
 		time.Sleep(1 * time.Second)
 	}
 
-	hash := tp.Hashes[hashIndex%len(tp.Hashes)]
+	hashSlot := hashIndex % len(tp.Hashes)
+	hash := tp.Hashes[hashSlot]
 	shortHash := hash
 	if len(shortHash) > 8 {
 		shortHash = shortHash[:8]
 	}
 	log.Printf("[GROUP #%d] Requesting creds (hash: %s...)", groupID, shortHash)
 
-	credStreamID := groupID * 100
+	// Кэш кредов keyed по hash-слоту, НЕ по groupID: иначе при workers=36 (4 группы) и
+	// одном хеше G2/G3/G4 каждый раз заново гоняют VK-auth/капчу → 3× ACTION_REQUIRED подряд,
+	// хотя TURN username/password от того же звонка уже есть у G1.
+	credStreamID := hashSlot*100 + 100
 	user, pass, turnURLs, err := GetCreds(ctx, hash, credStreamID)
 	var creds *Credentials
 	if err == nil {

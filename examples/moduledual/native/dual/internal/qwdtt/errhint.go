@@ -12,7 +12,7 @@ func workerErrorHint(err error) string {
 	text := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(text, "wrap_auth_timeout"):
-		return "server did not respond to WRAP/DTLS - check the password, IP/port, and that wdtt-server is running"
+		return "server did not answer WRAP/DTLS - try Raw IP transport (usually :56003) or enable WG/DTLS on that port"
 	case strings.Contains(text, "context canceled"):
 		return "connection aborted before handshake - usually server unreachable, UDP blocked by carrier, or network changed"
 	case strings.Contains(text, "context deadline exceeded"):

@@ -488,6 +488,11 @@ func RunSession(
 			if useWrap {
 				errStr := strings.ToLower(hsErr.Error())
 				if strings.Contains(errStr, "deadline") || strings.Contains(errStr, "timeout") {
+					peerStr := ""
+					if peer != nil {
+						peerStr = peer.String()
+					}
+					reportWrapNoAnswer(peerStr)
 					return false, fmt.Errorf("WRAP_AUTH_TIMEOUT: DTLS timeout, password/WRAP not confirmed")
 				}
 			}
