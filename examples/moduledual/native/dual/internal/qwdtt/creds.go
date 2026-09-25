@@ -589,9 +589,11 @@ func getTokenChain(ctx context.Context, link string, streamID int, creds VKCrede
 	var token2 string
 	var savedProfile *SavedProfile
 	savedProfile, _ = LoadProfileFromDisk()
-	// После одного интерактивного WBV (юзер уже решил капчу в WebView) повторный ACTION_REQUIRED
-	// почти никогда не помогает: VK отверг success_token → новая капча → ещё один диалог. Стоп.
-	interactiveCaptchaDone := false
+	// Один WBV на ОДНУ captcha-сессию (SessionToken). Повторный диалог по тому же sid почти
+	// никогда не помогает. Новая сессия от VK (другой SessionToken) — новый WBV разрешён:
+	// Legacy getAnonymousToken часто требует 2 разных капчи подряд; глобальный «один WBV навсегда»
+	// ломал именно Legacy token.
+	interactiveSessions := make(map[string]struct{})
 
 	for attempt := 0; ; attempt++ {
 		resp, err = doRequest(data, urlAddr)
@@ -607,9 +609,10 @@ func getTokenChain(ctx context.Context, link string, streamID int, creds VKCrede
 
 			captchaErr := parseVkCaptchaError(errObj)
 			if captchaErr != nil && captchaErr.RedirectURI != "" && captchaErr.SessionToken != "" {
-				if attempt >= 3 || interactiveCaptchaDone {
-					if interactiveCaptchaDone {
-						log.Printf("[STREAM %d] [Captcha] VK still rejected after interactive WebView solve — not showing captcha again", streamID)
+				_, alreadyShown := interactiveSessions[captchaErr.SessionToken]
+				if attempt >= 3 || alreadyShown {
+					if alreadyShown {
+						log.Printf("[STREAM %d] [Captcha] VK still rejected after WebView for this captcha session — stopping", streamID)
 					} else {
 						log.Printf("[STREAM %d] [Captcha] Max attempts reached", streamID)
 					}
@@ -631,7 +634,7 @@ func getTokenChain(ctx context.Context, link string, streamID int, creds VKCrede
 					return "", "", nil, fmt.Errorf("CAPTCHA_WAIT_REQUIRED")
 				}
 				if usedInteractive {
-					interactiveCaptchaDone = true
+					interactiveSessions[captchaErr.SessionToken] = struct{}{}
 				}
 
 				captchaAttempt := captchaErr.CaptchaAttempt

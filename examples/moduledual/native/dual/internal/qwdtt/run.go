@@ -153,7 +153,15 @@ func Run(configContent, resolversPath, profileDir, protectPath string, listenFd 
 	log.Printf("[SETTINGS] captcha mode: %s", setCaptchaMode(cfg.CaptchaMode))
 	// VK auth mode (SETTING_vkAuthMode) / anon path (SETTING_vkAnonPath) — см. vk_account.go. Пусто →
 	// дефолты уже заданы init()'ом этого пакета (anonymous/vkcalls) — вызовы ниже no-op в этом случае.
-	log.Printf("[SETTINGS] vk auth mode: %s / anon-path: %s", setVkAuthMode(cfg.VkAuthMode), setVkAnonPath(cfg.VkAnonPath))
+	//
+	// Dual UI: value `legacy` в SETTING_vkAuthMode подписан «Капча (CSQTT)», а «Legacy token» —
+	// отдельный SETTING_vkAnonPath. Юзеры часто включают первое, ожидая calls.getAnonymousToken.
+	// Для qWDTT оба означают один путь — форсируем anon-path=legacy.
+	anonPath := cfg.VkAnonPath
+	if strings.EqualFold(strings.TrimSpace(cfg.VkAuthMode), "legacy") {
+		anonPath = "legacy"
+	}
+	log.Printf("[SETTINGS] vk auth mode: %s / anon-path: %s", setVkAuthMode(cfg.VkAuthMode), setVkAnonPath(anonPath))
 
 	emitProgress("%s", "Starting qWDTT...")
 

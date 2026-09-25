@@ -415,6 +415,11 @@ func handleSocks(c net.Conn, user, pass string) {
 	log.Printf("PERFSPLIT tcpDial OK host=%s port=%d tcpDialElapsed=%v totalElapsed=%v conns=%d dials=%d", host, port, tcpDialElapsed, time.Since(dialStart), atomic.LoadInt64(&activeConns), dialsNow)
 	log.Printf("[PERF] connect OK host=%s port=%d dial=%v", host, port, time.Since(dialStart))
 	defer up.Close()
+	// TCP_NODELAY на SOCKS-клиентской стороне (sing-box → наш accept): Nagle копит мелкие
+	// записи реле и режет upload. gonet.TCPConn SetNoDelay не экспортирует — только эта сторона.
+	if nd, ok := c.(interface{ SetNoDelay(bool) error }); ok {
+		_ = nd.SetNoDelay(true)
+	}
 	if _, err := c.Write(socksRep(0x00)); err != nil {
 		return
 	}

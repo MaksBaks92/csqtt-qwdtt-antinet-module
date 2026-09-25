@@ -411,19 +411,29 @@ func (d *Dispatcher) readLoop() {
 			if d.tunIO != nil {
 				atomic.AddUint64(&d.tunSentCount, 1)
 			}
-		} else {
-			// Все workers перегружены — сдвигаем указатель, пакет дропается
-			d.rrIndex = (idx + 1) % nw
-			d.rrCount = 0
+			d.mu.Unlock()
+			continue
+		}
+
+		// Все non-blocking SendCh полны. Дропать IP из gVisor нельзя: стек уже считает
+		// пакет «ушедшим на NIC», потеря = дыра в TCP seq → retransmit + обвал cwnd.
+		// У оригинального qWDTT kernel-TUN в этом месте даёт backpressure в ядро — отсюда
+		// и разница raw upload ~100 vs ~20 у нас при том же wire. Блокируемся на слоте
+		// БЕЗ d.mu: иначе UnregisterWorker не сможет забрать воркер во время upload.
+		blockSlot := w
+		d.rrIndex = (idx + 1) % nw
+		d.rrCount = 0
+		d.chunkStartTs = now
+		d.mu.Unlock()
+		select {
+		case <-d.ctx.Done():
 			putPktBuf(pkt)
+			return
+		case blockSlot.SendCh <- pkt:
 			if d.tunIO != nil {
-				c := atomic.AddUint64(&d.tunDroppedCount, 1)
-				if c == 1 || c%50 == 0 {
-					rawDiagf("readLoop: TUN packet DROPPED - all workers overloaded (dropped total=%d)", c)
-				}
+				atomic.AddUint64(&d.tunSentCount, 1)
 			}
 		}
-		d.mu.Unlock()
 	}
 }
 

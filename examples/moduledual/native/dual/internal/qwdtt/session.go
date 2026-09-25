@@ -24,7 +24,11 @@ import (
 )
 
 const (
-	workerSendBuf      = 128
+	// Глубина SendCh на воркер. 128 при raw/SOCKS+gVisor не хватало на upload: TCP
+	// внутри netstack успевал залить NIC быстрее, чем Writer успевал AEAD+TURN →
+	// диспетчер упирался в полные каналы. Раньше дропал пакеты (обвал cwnd); теперь
+	// backpressure, но глубокая очередь всё равно снижает частоту блокировок.
+	workerSendBuf = 512
 	sessionReadTimeout = 30 * time.Minute // Increased from 60s to 30min
 	readBufSize        = 1600
 	socketBufSize      = 625 * 1024
