@@ -1,13 +1,13 @@
 {
   "version": "0.2.7-dual",
   "android": {
-    "arm64-v8a": "https://<host>/dual-android-arm64-v8a.zip",
-    "armeabi-v7a": "https://<host>/dual-android-armeabi-v7a.zip",
-    "x86": "https://<host>/dual-android-x86.zip",
-    "x86_64": "https://<host>/dual-android-x86_64.zip"
+    "arm64-v8a": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module/releases/download/v0.2.7-dual/dual-android-arm64-v8a.zip",
+    "armeabi-v7a": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module/releases/download/v0.2.7-dual/dual-android-armeabi-v7a.zip",
+    "x86": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module/releases/download/v0.2.7-dual/dual-android-x86.zip",
+    "x86_64": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module/releases/download/v0.2.7-dual/dual-android-x86_64.zip"
   },
   "desktop": {
-    "linux_amd64": "https://<host>/dual-linux_amd64.zip"
+    "linux_amd64": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module/releases/download/v0.2.7-dual/dual-linux_amd64.zip"
   },
-  "changelog": "что нового в этой версии"
+  "changelog": "0.2.7-dual: raw upload backpressure (no gVisor packet drops); Legacy token maps from vkAuthMode=legacy; WebView captcha allowed per new captcha session."
 }
