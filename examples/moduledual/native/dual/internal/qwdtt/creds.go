@@ -765,13 +765,11 @@ func solveCaptchaBySelectedMode(
 			log.Printf("[STREAM %d] [CAPTCHA] RJS: captcha session is dead, requesting a new one from VK", streamID)
 			return "", false, markCaptchaSessionExpired(streamID)
 		}
-		if isCaptchaSessionExhausted(solveErr) {
-			log.Printf("[STREAM %d] [CAPTCHA] RJS: rate limit, falling back to WBV Auto", streamID)
-			token, err := requestWebViewCaptcha(streamID, captchaErr, "auto", captchaAutoWebViewTimeout)
-			return token, true, err
-		}
-		log.Printf("[STREAM %d] [CAPTCHA] RJS: error, falling back to WBV Auto: %v", streamID, solveErr)
-		token, err := requestWebViewCaptcha(streamID, captchaErr, "auto", captchaAutoWebViewTimeout)
+		// Go auto-solver regularly gets BOT/init-miss (FingerprintJS); WBV is the real path.
+		// Use selected (120s) budget — auto/10s was racing the host connect-timeout before the
+		// user could finish the dialog (Legacy always hits captcha → always hit this fallback).
+		log.Printf("[STREAM %d] [CAPTCHA] RJS: error, falling back to WBV (timeout %s): %v", streamID, captchaSelectedWebViewTimeout, solveErr)
+		token, err := requestWebViewCaptcha(streamID, captchaErr, "auto", captchaSelectedWebViewTimeout)
 		return token, true, err
 	}
 
@@ -793,11 +791,12 @@ func solveCaptchaBySelectedMode(
 	if errors.Is(solveErr, errCaptchaV2RateLimit) || strings.Contains(strings.ToLower(solveErr.Error()), "rate limit") {
 		log.Printf("[STREAM %d] [CAPTCHA] AUTO: rate limit on Go v2, trying WBV", streamID)
 	}
-	log.Printf("[STREAM %d] [CAPTCHA] AUTO: Go v2 did not solve it in 2 attempts: %v", streamID, solveErr)
+	log.Printf("[STREAM %d] [CAPTCHA] AUTO: Go v2 did not solve it: %v", streamID, solveErr)
 
 	// Один WebView на всю цепочку: раньше было 2× auto + manual = до 3 ACTION_REQUIRED подряд.
-	log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV attempt (timeout %s)", streamID, captchaAutoWebViewTimeout)
-	token, solveErr = requestWebViewCaptcha(streamID, captchaErr, "auto", captchaAutoWebViewTimeout)
+	// 120s (selected) so the host connect-timeout pause has room for the user to finish.
+	log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV attempt (timeout %s)", streamID, captchaSelectedWebViewTimeout)
+	token, solveErr = requestWebViewCaptcha(streamID, captchaErr, "auto", captchaSelectedWebViewTimeout)
 	if solveErr == nil {
 		log.Printf("[STREAM %d] [CAPTCHA] AUTO: WBV solved the captcha", streamID)
 		return token, true, nil

@@ -37,7 +37,9 @@ const (
 var (
 	reCaptchaV2PowInput   = regexp.MustCompile(`const\s+powInput\s*=\s*"([^"]+)"`)
 	reCaptchaV2Difficulty = regexp.MustCompile(`const\s+difficulty\s*=\s*(\d+)`)
-	reCaptchaV2WindowInit = regexp.MustCompile(`(?s)window\.init\s*=\s*(\{.*?})\s*;`)
+	// Anchored like upstream vk-turn-proxy: non-greedy `{.*?}` alone stops on the first nested `};`.
+	reCaptchaV2WindowInit = regexp.MustCompile(`(?s)window\.init\s*=\s*(\{.*?})\s*;\s*window\.lang`)
+	reCaptchaV2WindowInitLoose = regexp.MustCompile(`(?s)window\.init\s*=\s*\{`)
 	reCaptchaV2ScriptSrc  = regexp.MustCompile(`src="(https://[^"]+not_robot_captcha[^"]+)"`)
 	reCaptchaV2DebugInfo  = regexp.MustCompile(`debug_info:(?:[^"]*\|\|)?"([a-fA-F0-9]{64})"`)
 	reCaptchaV2Version    = regexp.MustCompile(`vkid/([0-9.]*)/not_robot_captcha\.js`)
@@ -45,6 +47,9 @@ var (
 	errCaptchaV2RateLimit      = errors.New("captcha session rate limit reached")
 	errCaptchaV2Bot            = errors.New("captcha bot challenge")
 	errCaptchaSessionExpired     = errors.New("captcha session expired, need fresh challenge")
+	// Page HTML has no usable captcha bootstrap (bot interstitial / wrong TLS / expired session).
+	// Retrying with a rotated identity will not help — fall through to WBV immediately.
+	errCaptchaV2InitNotFound = errors.New("captcha init json not found")
 
 	captchaV2MaxAttempts = 2
 	captchaV2MaxSliderChecks = 2
@@ -147,6 +152,13 @@ func solveVkCaptchaV2Attempts(
 		}
 		log.Printf("[CAPTCHA] v2 attempt %d error: %v", attempt, solveErr)
 		if errors.Is(solveErr, errCaptchaV2RateLimit) {
+			return "", solveErr
+		}
+		// HTML/bootstrap failures are not identity-sensitive — each retry burns ~0.5–1s and
+		// eats into the host connect budget before WBV ACTION_REQUIRED can be shown.
+		if errors.Is(solveErr, errCaptchaV2InitNotFound) ||
+			strings.Contains(solveErr.Error(), "captcha script url not found") ||
+			strings.Contains(solveErr.Error(), "failed to find PoW settings") {
 			return "", solveErr
 		}
 
@@ -449,21 +461,81 @@ func (s *captchaV2Session) fetchDebugInfo(scriptURL string) (string, error) {
 	return v, nil
 }
 
+// extractWindowInitJSON pulls the object assigned to window.init.
+// Prefer the upstream-anchored regex (ends at `; window.lang`); fall back to brace-balanced
+// scan so nested `{…}` inside captcha_settings does not truncate the JSON.
+func extractWindowInitJSON(html string) (string, bool) {
+	if m := reCaptchaV2WindowInit.FindStringSubmatch(html); len(m) >= 2 {
+		return m[1], true
+	}
+	loc := reCaptchaV2WindowInitLoose.FindStringIndex(html)
+	if loc == nil {
+		return "", false
+	}
+	start := loc[1] - 1 // index of '{'
+	depth := 0
+	inString := false
+	escape := false
+	for i := start; i < len(html); i++ {
+		c := html[i]
+		if inString {
+			if escape {
+				escape = false
+				continue
+			}
+			if c == '\\' {
+				escape = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return html[start : i+1], true
+			}
+		}
+	}
+	return "", false
+}
+
+func captchaHTMLSnippet(html string) string {
+	s := strings.Join(strings.Fields(html), " ")
+	if len(s) > 240 {
+		return s[:240] + "…"
+	}
+	return s
+}
+
 func parseCaptchaV2Page(html string) (*captchaV2Page, error) {
 	page := &captchaV2Page{}
 
-	match := reCaptchaV2WindowInit.FindStringSubmatch(html)
-	if len(match) < 2 {
-		return nil, errors.New("captcha init json not found")
+	if raw, ok := extractWindowInitJSON(html); ok {
+		var init captchaV2Init
+		if err := json.Unmarshal([]byte(raw), &init); err != nil {
+			return nil, fmt.Errorf("captcha init json parse: %w", err)
+		}
+		page.Init = &init
+	} else {
+		// Upstream treats missing window.init as empty settings and still solves checkbox via PoW.
+		// Hard-fail only when the page also lacks PoW/script — that means we got a non-captcha
+		// body (bot interstitial / TLS fingerprint block / expired redirect).
+		log.Printf("[CAPTCHA] v2 window.init missing (len=%d snippet=%q)", len(html), captchaHTMLSnippet(html))
 	}
-	var init captchaV2Init
-	if err := json.Unmarshal([]byte(match[1]), &init); err != nil {
-		return nil, fmt.Errorf("captcha init json parse: %w", err)
-	}
-	page.Init = &init
 
-	match = reCaptchaV2ScriptSrc.FindStringSubmatch(html)
+	match := reCaptchaV2ScriptSrc.FindStringSubmatch(html)
 	if len(match) < 2 {
+		if page.Init == nil {
+			return nil, errCaptchaV2InitNotFound
+		}
 		return nil, errors.New("captcha script url not found")
 	}
 	page.ScriptURL = match[1]
@@ -472,10 +544,20 @@ func parseCaptchaV2Page(html string) (*captchaV2Page, error) {
 		page.PowInput = m[1]
 	}
 	if page.PowInput == "" {
+		if page.Init == nil {
+			return nil, errCaptchaV2InitNotFound
+		}
 		return page, nil
 	}
 
 	match = reCaptchaV2Difficulty.FindStringSubmatch(html)
+	if len(match) < 2 {
+		// Also try upstream's startsWith('0'.repeat(N)) form.
+		reRepeat := regexp.MustCompile(`startsWith\('0'\.repeat\((\d+)\)\)`)
+		if m2 := reRepeat.FindStringSubmatch(html); len(m2) >= 2 {
+			match = m2
+		}
+	}
 	if len(match) < 2 {
 		return nil, errors.New("captcha difficulty const not found")
 	}
