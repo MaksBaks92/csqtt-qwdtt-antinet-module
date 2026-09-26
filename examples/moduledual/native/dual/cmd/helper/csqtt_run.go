@@ -373,7 +373,7 @@ func canPingCSQTT(arg string) string {
 		return "ok"
 	}
 	st := restoreSavedState(blob)
-	if len(st.ManualHashes) > 0 || st.VKToken != "" {
+	if len(st.ManualHashes) > 0 || len(st.AutoHashes) > 0 || st.VKToken != "" {
 		return "ok"
 	}
 	return "no"
@@ -389,6 +389,7 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 	cfg := parseConfig(configContent)
 	s := csqttStringsFor(cfg["APP_LANG"])
 	persisted = restoreSavedState(cfg["MODULE_STATE"])
+	qwdtt.HydrateTurnFromModuleState(cfg["MODULE_STATE"])
 	deviceID, generation, sessionSalt := nextEngineIdentity(cfg, &persisted)
 	persistState()
 	emitLog(s.deviceIDFmt, deviceID, persistedDeviceSource(cfg, deviceID))
@@ -409,7 +410,12 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 		workers = 18
 	}
 
-	resolver := newProtectedResolver(cfg["DNS_SERVERS"], protectPath)
+	dnsCSV := strings.TrimSpace(cfg["DNS_SERVERS"])
+	if dnsCSV == "" {
+		// Android: DNS_SERVERS часто пуст после OAuth (TUN снят) → hostDNS/preset UDP.
+		dnsCSV = qwdtt.ProtectDNSCsv(cfg["SETTING_dnsPreset"], hostDNSServers())
+	}
+	resolver := newProtectedResolver(dnsCSV, protectPath)
 	configureVkHTTP(protectPath, resolver)
 
 	hashMode, authMode := normalizeVkModes(cfg["SETTING_hashMode"], cfg["SETTING_vkAuthMode"])
@@ -421,8 +427,19 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 	allowRedistrib := false
 	var hashes []string
 	seedHashes := uniqHashes(append(collectManualHashes(cfg, link.Hashes), persisted.ManualHashes...))
+	// Авто-хеши из MODULE_STATE — до OAuth: иначе каждый connect снова лезет в VK.
+	if hashMode == "auto_api" {
+		if cached, ok := takeCachedAutoHashes(); ok {
+			hashes = cached
+			allowRedistrib = true
+			left := autoHashesTTL - time.Since(time.Unix(persisted.AutoHashesAt, 0))
+			emitLog("CSQTT: auto hashes cache hit · %d · TTL left %s — no OAuth/calls.start", len(hashes), left.Truncate(time.Second))
+		}
+	}
 	// Token FIRST (native CSQTT order): login → remixsid → scrape → save. Engine/SOCKS later.
-	if needsVkOAuth(hashMode, authMode) {
+	// С валидным кешем auto_api + vkcalls токен не нужен (calls.start не будет).
+	needOAuth := needsVkOAuth(hashMode, authMode) && !(hashMode == "auto_api" && len(hashes) > 0 && authMode != "auto_js")
+	if needOAuth {
 		tok, terr := ensureVkToken(cfg["MODULE_STATE"], profileDir, s, resolver)
 		if terr != nil {
 			// Как в ≤1.2.5: при срыве OAuth/API не роняем сессию, если хеши уже есть.
@@ -431,6 +448,12 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 				hashMode = "manual"
 				authMode = "vkcalls"
 				hashes = seedHashes
+			} else if cached, ok := takeCachedAutoHashes(); ok {
+				emitLog("CSQTT: вход в VK не удался (%v), беру auto hashes из состояния", terr)
+				hashMode = "manual"
+				authMode = "vkcalls"
+				hashes = cached
+				allowRedistrib = true
 			} else {
 				emitLog(s.vkLoginFailedFmt, terr)
 				emitStatus(statusFatal, "vk login failed")
@@ -443,6 +466,10 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 	if len(hashes) == 0 {
 		switch hashMode {
 		case "auto_api":
+			if len(persisted.AutoHashes) > 0 {
+				emitLog("CSQTT: auto hashes cache expired — refresh via calls.start")
+				expireAutoHashes(vkToken)
+			}
 			emitProgress("%s", s.vkAutoAPIProgress)
 			started, aerr := startVkAutoCalls(vkToken, workers)
 			if errors.Is(aerr, errVkTokenInvalid) {
@@ -484,7 +511,8 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 				} else {
 					hashes = started.Hashes
 					allowRedistrib = started.needsRedistribution()
-					defer finishVkAutoCalls(vkToken, started.Calls)
+					storeAutoHashes(started)
+					// Не forceFinish на стопе — хеши в MODULE_STATE до TTL.
 				}
 			}
 		case "auto_js":
@@ -513,63 +541,14 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 		persistState()
 	}
 
-	// Добор хешей под SETTING_workers (как у qWDTT). CSQTT: 1 хеш ≈ 3×9 = 27 воркеров
-	// (callCountForWorkers). Если в ссылке/полях меньше — Авто API; иначе движок шарит слоты.
+	// CSQTT: 1 хеш ≈ 3×9 = 27 воркеров (callCountForWorkers). Как в оригинале —
+	// hashes= в ссылке/полях живут долго; добор calls.start только если хешей нет
+	// вовсе (не каждый connect). Иначе движок шарит слоты (allowRedistrib).
 	needHashes := callCountForWorkers(workers)
 	emitLog("CSQTT: workers=%d · hashes=%d · need=%d", workers, len(hashes), needHashes)
-	// auto_js с пустым списком: звонки создаёт rust-движок — не дублируем calls.start здесь.
-	if len(hashes) < needHashes && !(hashMode == "auto_js" && len(hashes) == 0) {
-		if vkToken == "" {
-			tok, terr := ensureVkToken(cfg["MODULE_STATE"], profileDir, s, resolver)
-			if terr != nil {
-				if len(hashes) == 0 {
-					emitLog(s.vkLoginFailedFmt, terr)
-					emitStatus(statusFatal, "vk login failed")
-					log.Fatalf("vk token: %v", terr)
-				}
-				emitLog("CSQTT: не хватает хешей (%d/%d), вход в VK не удался (%v) — распределение по имеющимся", len(hashes), needHashes, terr)
-				allowRedistrib = true
-			} else {
-				vkToken = tok
-			}
-		}
-		if vkToken != "" && len(hashes) < needHashes {
-			want := needHashes - len(hashes)
-			emitLog("CSQTT: добор хешей %d→%d (+%d)", len(hashes), needHashes, want)
-			emitProgress("%s", s.vkAutoAPIProgress)
-			started, aerr := startVkAutoCallsCount(vkToken, want)
-			if errors.Is(aerr, errVkTokenInvalid) {
-				saveVkToken("")
-				emitProgress("%s", s.vkLoginProgress)
-				fresh, ferr := requestVkAccessToken(profileDir)
-				if ferr != nil {
-					aerr = ferr
-				} else {
-					vkToken = fresh
-					saveVkToken(vkToken)
-					started, aerr = startVkAutoCallsCount(vkToken, want)
-				}
-			}
-			if aerr != nil || len(started.Hashes) == 0 {
-				if aerr == nil {
-					aerr = fmt.Errorf("empty hash list")
-				}
-				if len(hashes) == 0 {
-					emitLog(s.vkAutoAPIFailedFmt, aerr)
-					emitStatus(statusFatal, "vk auto api failed")
-					log.Fatalf("vk auto api: %v", aerr)
-				}
-				emitLog("CSQTT: добор хешей не удался (%v) — распределение по %d", aerr, len(hashes))
-				allowRedistrib = true
-			} else {
-				hashes = uniqHashes(append(hashes, started.Hashes...))
-				defer finishVkAutoCalls(vkToken, started.Calls)
-				emitLog("CSQTT: хешей после добора: %d (создано %d)", len(hashes), len(started.Hashes))
-				if len(hashes) < needHashes {
-					allowRedistrib = true
-				}
-			}
-		}
+	if len(hashes) > 0 && len(hashes) < needHashes {
+		emitLog("CSQTT: soft-skip top-up: %d hashes present (need=%d) — groups share; no OAuth/calls.start", len(hashes), needHashes)
+		allowRedistrib = true
 	}
 
 	// Engine off-TUN CONNECT proxy only AFTER token/hashes are ready.
@@ -997,7 +976,14 @@ type savedState struct {
 	DeviceID     string   `json:"device_id"`
 	Generation   uint64   `json:"generation"`
 	ManualHashes []string `json:"manual_hashes,omitempty"`
+	// Авто API: хеши живут в MODULE_STATE до TTL — без calls.start/forceFinish на каждый connect.
+	AutoHashes   []string `json:"auto_hashes,omitempty"`
+	AutoCallIDs  []string `json:"auto_call_ids,omitempty"`
+	AutoHashesAt int64    `json:"auto_hashes_at,omitempty"`
 }
+
+// autoHashesTTL — как у ручных hashes= в ссылке (дни). Пока не истёк — только reuse.
+const autoHashesTTL = 72 * time.Hour
 
 var persisted savedState
 
@@ -1015,6 +1001,10 @@ func restoreSavedState(blob string) savedState {
 	st.VKToken = strings.TrimSpace(st.VKToken)
 	st.DeviceID = strings.TrimSpace(st.DeviceID)
 	st.ManualHashes = uniqHashes(st.ManualHashes)
+	st.AutoHashes = uniqHashes(st.AutoHashes)
+	if len(st.AutoCallIDs) > len(st.AutoHashes) {
+		st.AutoCallIDs = st.AutoCallIDs[:len(st.AutoHashes)]
+	}
 	return st
 }
 
@@ -1022,12 +1012,91 @@ func restoredVkToken(blob string) string {
 	return restoreSavedState(blob).VKToken
 }
 
+func helperStateFields() map[string]any {
+	m := map[string]any{
+		"vk_token":   persisted.VKToken,
+		"device_id":  persisted.DeviceID,
+		"generation": persisted.Generation,
+	}
+	if len(persisted.ManualHashes) > 0 {
+		m["manual_hashes"] = append([]string(nil), persisted.ManualHashes...)
+	}
+	if len(persisted.AutoHashes) > 0 {
+		m["auto_hashes"] = append([]string(nil), persisted.AutoHashes...)
+		m["auto_call_ids"] = append([]string(nil), persisted.AutoCallIDs...)
+		m["auto_hashes_at"] = persisted.AutoHashesAt
+	}
+	return m
+}
+
+func autoHashesCacheValid() bool {
+	if len(persisted.AutoHashes) == 0 || persisted.AutoHashesAt <= 0 {
+		return false
+	}
+	age := time.Since(time.Unix(persisted.AutoHashesAt, 0))
+	return age >= 0 && age < autoHashesTTL
+}
+
+func takeCachedAutoHashes() ([]string, bool) {
+	if !autoHashesCacheValid() {
+		return nil, false
+	}
+	out := append([]string(nil), persisted.AutoHashes...)
+	return out, true
+}
+
+func storeAutoHashes(started vkAutoStart) {
+	persisted.AutoHashes = uniqHashes(started.Hashes)
+	ids := make([]string, 0, len(started.Calls))
+	for _, c := range started.Calls {
+		if id := strings.TrimSpace(c.CallID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	persisted.AutoCallIDs = ids
+	persisted.AutoHashesAt = time.Now().Unix()
+	persistState()
+}
+
+func expireAutoHashes(token string) {
+	if len(persisted.AutoCallIDs) == 0 && len(persisted.AutoHashes) == 0 {
+		return
+	}
+	calls := make([]vkActiveCall, 0, len(persisted.AutoCallIDs))
+	for i, id := range persisted.AutoCallIDs {
+		h := ""
+		if i < len(persisted.AutoHashes) {
+			h = persisted.AutoHashes[i]
+		}
+		calls = append(calls, vkActiveCall{CallID: id, Hash: h})
+	}
+	if tok := strings.TrimSpace(token); tok != "" && len(calls) > 0 {
+		finishVkAutoCalls(tok, calls)
+	}
+	persisted.AutoHashes = nil
+	persisted.AutoCallIDs = nil
+	persisted.AutoHashesAt = 0
+	persistState()
+}
+
 func persistState() {
 	body, err := json.Marshal(persisted)
 	if err != nil {
 		return
 	}
-	fmt.Printf("STATE_SAVE|%s\n", base64.StdEncoding.EncodeToString(body))
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return
+	}
+	// Не затирать TURN-поля из последнего SaveCredsToHost (единый MODULE_STATE).
+	for k, v := range qwdtt.LastTurnStateFields() {
+		m[k] = v
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return
+	}
+	fmt.Printf("STATE_SAVE|%s\n", base64.StdEncoding.EncodeToString(out))
 	_ = os.Stdout.Sync()
 }
 

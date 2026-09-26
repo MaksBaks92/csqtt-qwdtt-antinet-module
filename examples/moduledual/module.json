@@ -9,10 +9,10 @@
     "qWDTT"
   ],
   "name": "CSQTT / qWDTT",
-  "description": "Два протокола в одном модуле: csqtt:// → сервер CSQTT (WIRE-3), qwdtt:// → VPS qWDTT (WG/raw). Общий слой VK-хешей/TURN. В UI AntiNet настройки с schemes=[csqtt] видны только у csqtt://, с schemes=[qwdtt] — только у qwdtt://; общие — у обеих. Хеши VK показываются только в режиме «Ручной».",
+  "description": "Два протокола в одном модуле: csqtt:// → сервер CSQTT (WIRE-3), qwdtt:// → VPS qWDTT (WG/raw). Общий слой VK-хешей/TURN. Общие настройки сверху; схемы — в раскрываемых блоках CSQTT / qWDTT. Хеши VK показываются только в режиме «Ручной».",
   "homepage": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module",
   "updateUrl": "https://raw.githubusercontent.com/MaksBaks92/csqtt-qwdtt-antinet-module/main/antinet-module.json",
-  "version": "0.2.12-dual",
+  "version": "0.2.15-dual",
   "license": "GPL-3.0-or-later (combined helper); CSQTT portions PolyForm-Noncommercial — see NOTICE",
   "handoverMode": "signal",
   "hostEvents": [
@@ -47,18 +47,14 @@
       "min": 9,
       "max": 72,
       "step": 9,
-      "description": "Обе схемы. Кратно 9 (группы по 9). Модуль сам добирает VK-хеши под это число: qWDTT — 1 на группу (9), CSQTT — 1 на ~27 воркеров. Берётся только эта настройка; workers= в ссылке игнорируется.",
-      "schemes": [
-        "csqtt",
-        "qwdtt"
-      ]
+      "description": "Обе схемы. Кратно 9 (группы по 9). Хеши из ссылки/полей шарятся между группами — модуль не добирает звонки на каждый connect. Авто API создаёт хеши только если их нет вовсе."
     },
     {
       "key": "hashMode",
       "type": "enum",
       "label": "Режим хешей VK",
       "default": "manual",
-      "description": "Ручной — поля хешей ниже. Авто API / Авто ВК — helper создаёт звонки сам (поля хешей скрыты). Для qWDTT без hashes= в ссылке — Авто API создаёт свои звонки (нужен вход в VK).",
+      "description": "Ручной — поля хешей ниже. Авто API / Авто ВК — helper создаёт звонки сам, если хешей нет (кеш в MODULE_STATE до TTL).",
       "options": [
         {
           "value": "manual",
@@ -72,10 +68,6 @@
           "value": "auto_js",
           "label": "Авто ВК"
         }
-      ],
-      "schemes": [
-        "csqtt",
-        "qwdtt"
       ]
     },
     {
@@ -83,17 +75,13 @@
       "type": "string",
       "label": "VK-хеш 1",
       "default": "",
-      "description": "Ссылка vk.com/call/join/… или сам хеш. Для CSQTT (hashMode=manual) и запасной для qWDTT.",
+      "description": "Ссылка vk.com/call/join/… или сам хеш.",
       "visibleWhen": {
         "key": "hashMode",
         "in": [
           "manual"
         ]
-      },
-      "schemes": [
-        "csqtt",
-        "qwdtt"
-      ]
+      }
     },
     {
       "key": "vkHash2",
@@ -106,11 +94,7 @@
         "in": [
           "manual"
         ]
-      },
-      "schemes": [
-        "csqtt",
-        "qwdtt"
-      ]
+      }
     },
     {
       "key": "vkHash3",
@@ -123,11 +107,7 @@
         "in": [
           "manual"
         ]
-      },
-      "schemes": [
-        "csqtt",
-        "qwdtt"
-      ]
+      }
     },
     {
       "key": "vkHash4",
@@ -140,11 +120,7 @@
         "in": [
           "manual"
         ]
-      },
-      "schemes": [
-        "csqtt",
-        "qwdtt"
-      ]
+      }
     },
     {
       "key": "vkAuthMode",
@@ -190,35 +166,48 @@
       "description": "Диагностика (в основном CSQTT gVisor/bridge)."
     },
     {
+      "key": "panelCsqtt",
+      "type": "bool",
+      "label": "CSQTT",
+      "default": false,
+      "description": "Раскрыть настройки только для csqtt://"
+    },
+    {
       "key": "idleWorkers",
       "type": "int",
-      "label": "CSQTT воркеров в простое",
+      "label": "Воркеров в простое",
       "default": 2,
       "min": 0,
       "max": 72,
-      "description": "Только csqtt://. 0 — выключить deep idle.",
-      "schemes": [
-        "csqtt"
-      ]
+      "description": "0 — выключить deep idle.",
+      "visibleWhen": {
+        "key": "panelCsqtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "idleAfterSec",
       "type": "int",
-      "label": "CSQTT простой через (сек)",
+      "label": "Простой через (сек)",
       "default": 180,
       "min": 30,
       "max": 3600,
-      "description": "Только csqtt://.",
-      "schemes": [
-        "csqtt"
-      ]
+      "description": "Через сколько секунд без трафика уходить в idle.",
+      "visibleWhen": {
+        "key": "panelCsqtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "obfs",
       "type": "enum",
-      "label": "Обфускация CSQTT",
+      "label": "Обфускация",
       "default": "audio",
-      "description": "Только csqtt://.",
+      "description": "Тип RTP-обфускации CSQTT.",
       "options": [
         {
           "value": "audio",
@@ -229,16 +218,19 @@
           "label": "Video"
         }
       ],
-      "schemes": [
-        "csqtt"
-      ]
+      "visibleWhen": {
+        "key": "panelCsqtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "turnTransport",
       "type": "enum",
-      "label": "TURN CSQTT",
+      "label": "TURN",
       "default": "udp",
-      "description": "Только csqtt://. TCP — если режут UDP.",
+      "description": "TCP — если режут UDP.",
       "options": [
         {
           "value": "udp",
@@ -249,26 +241,39 @@
           "label": "TCP"
         }
       ],
-      "schemes": [
-        "csqtt"
-      ]
+      "visibleWhen": {
+        "key": "panelCsqtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "fecDuplicate",
       "type": "bool",
-      "label": "FEC мелкого UDP (CSQTT)",
+      "label": "FEC мелкого UDP",
       "default": true,
-      "description": "Только csqtt://.",
-      "schemes": [
-        "csqtt"
-      ]
+      "description": "Дублирование мелких UDP-пакетов.",
+      "visibleWhen": {
+        "key": "panelCsqtt",
+        "in": [
+          "true"
+        ]
+      }
+    },
+    {
+      "key": "panelQwdtt",
+      "type": "bool",
+      "label": "qWDTT",
+      "default": false,
+      "description": "Раскрыть настройки только для qwdtt://"
     },
     {
       "key": "captchaMode",
       "type": "enum",
-      "label": "Капча VK (qWDTT)",
+      "label": "Капча VK",
       "default": "auto",
-      "description": "Только qwdtt://.",
+      "description": "Как решать VK-капчу при получении TURN.",
       "options": [
         {
           "value": "auto",
@@ -283,16 +288,19 @@
           "label": "Только webview"
         }
       ],
-      "schemes": [
-        "qwdtt"
-      ]
+      "visibleWhen": {
+        "key": "panelQwdtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "vkAnonPath",
       "type": "enum",
-      "label": "Анонимный путь VK (qWDTT)",
+      "label": "Анонимный путь VK",
       "default": "vkcalls",
-      "description": "Только qwdtt://.",
+      "description": "Источник анонимных TURN-кредов.",
       "options": [
         {
           "value": "vkcalls",
@@ -303,14 +311,17 @@
           "label": "Legacy token (getAnonymousToken)"
         }
       ],
-      "schemes": [
-        "qwdtt"
-      ]
+      "visibleWhen": {
+        "key": "panelQwdtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "dnsPreset",
       "type": "enum",
-      "label": "DNS для VK (qWDTT)",
+      "label": "DNS для VK",
       "default": "yandex",
       "description": "Только цепочка подключения qWDTT, не туннельный DNS.",
       "options": [
@@ -335,16 +346,19 @@
           "label": "Google DoH"
         }
       ],
-      "schemes": [
-        "qwdtt"
-      ]
+      "visibleWhen": {
+        "key": "panelQwdtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "connMode",
       "type": "enum",
-      "label": "Транспорт qWDTT",
+      "label": "Транспорт",
       "default": "vpn",
-      "description": "Только qwdtt://. Raw IP требует -listen-raw на VPS.",
+      "description": "Raw IP требует -listen-raw на VPS.",
       "options": [
         {
           "value": "vpn",
@@ -355,65 +369,68 @@
           "label": "Raw IP"
         }
       ],
-      "schemes": [
-        "qwdtt"
-      ]
+      "visibleWhen": {
+        "key": "panelQwdtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "noDtls",
       "type": "bool",
-      "label": "Без DTLS (qWDTT)",
+      "label": "Без DTLS",
       "default": false,
-      "description": "Только qwdtt://. Нужен -listen-direct на сервере.",
-      "schemes": [
-        "qwdtt"
-      ]
+      "description": "Нужен -listen-direct на сервере.",
+      "visibleWhen": {
+        "key": "panelQwdtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "turnTcp",
       "type": "bool",
-      "label": "TURN по TCP (qWDTT)",
+      "label": "TURN по TCP",
       "default": false,
-      "description": "Только qwdtt://.",
-      "schemes": [
-        "qwdtt"
-      ]
+      "description": "TCP вместо UDP для TURN.",
+      "visibleWhen": {
+        "key": "panelQwdtt",
+        "in": [
+          "true"
+        ]
+      }
     },
     {
       "key": "directPort",
       "type": "int",
-      "label": "Порт без DTLS (qWDTT)",
+      "label": "Порт без DTLS",
       "default": 56002,
       "min": 1,
       "max": 65535,
-      "description": "Только если «Без DTLS».",
+      "description": "Используется только если включено «Без DTLS».",
       "visibleWhen": {
-        "key": "noDtls",
+        "key": "panelQwdtt",
         "in": [
           "true"
         ]
-      },
-      "schemes": [
-        "qwdtt"
-      ]
+      }
     },
     {
       "key": "rawPort",
       "type": "int",
-      "label": "Порт Raw IP (qWDTT)",
+      "label": "Порт Raw IP",
       "default": 56003,
       "min": 1,
       "max": 65535,
-      "description": "Только режим Raw IP.",
+      "description": "Используется только в режиме Raw IP.",
       "visibleWhen": {
-        "key": "connMode",
+        "key": "panelQwdtt",
         "in": [
-          "rawtun"
+          "true"
         ]
-      },
-      "schemes": [
-        "qwdtt"
-      ]
+      }
     }
   ],
   "helperBinary": {

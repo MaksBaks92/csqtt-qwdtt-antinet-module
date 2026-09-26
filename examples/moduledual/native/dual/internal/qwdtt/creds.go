@@ -965,6 +965,31 @@ func goDNSServersForArg(arg string) []string {
 	return goDNSServersForPreset(arg)
 }
 
+// ProtectDNSCsv — CSV UDP DNS для newProtectedResolver / Auto API (calls.start).
+// preferHost — DNS_SERVERS / hostDNSServers от AntiNet; иначе SETTING_dnsPreset
+// (DoH → matching UDP: doh-cloudflare→1.1.1.1, doh-google→8.8.8.8).
+func ProtectDNSCsv(dnsPreset string, preferHost []string) string {
+	if len(preferHost) > 0 {
+		return strings.Join(preferHost, ",")
+	}
+	preset := strings.TrimSpace(dnsPreset)
+	if goDNSIsDoH(preset) {
+		lower := strings.ToLower(preset)
+		switch {
+		case strings.Contains(lower, "cloudflare"):
+			preset = "cloudflare"
+		case strings.Contains(lower, "google"):
+			preset = "google"
+		default:
+			preset = "yandex"
+		}
+	}
+	if preset == "" {
+		preset = "yandex"
+	}
+	return strings.Join(goDNSServersForArg(preset), ",")
+}
+
 func goDNSLabel(arg string) string {
 	arg = strings.TrimSpace(arg)
 	if strings.HasPrefix(arg, "custom:") {

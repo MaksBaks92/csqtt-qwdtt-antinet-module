@@ -10,6 +10,7 @@ import (
 	"log"
 	"strings"
 	"syscall"
+	"time"
 
 	"dual-antinet/internal/qwdtt"
 	"dual-antinet/internal/route"
@@ -71,18 +72,33 @@ func wireQwdtt() {
 	qwdtt.WireHostEvents(setHostEventHandler, startHostEventReader)
 	qwdtt.WireStatusConsts("ready", statusOK, statusFatal)
 	qwdtt.WireAutoHashes(qwdttAutoHashes)
+	qwdtt.WireExtraModuleState(helperStateFields)
 }
 
-// qwdttAutoHashes — Авто API (calls.start) для добора хешей под группы qWDTT.
-// wantHashes — сколько звонков создать (1 хеш ≈ 1 группа из 9 воркеров), не CSQTT-формула.
-func qwdttAutoHashes(profileDir, protectPath, moduleState string, wantHashes int, hashMode string) ([]string, func(), error) {
+// qwdttAutoHashes — Авто API (calls.start), только когда в ссылке нет хешей
+// и нет валидного кеша в MODULE_STATE (TTL autoHashesTTL). dnsPreset → ProtectDNSCsv.
+func qwdttAutoHashes(profileDir, protectPath, moduleState, dnsPreset string, wantHashes int, hashMode string) ([]string, func(), error) {
 	_ = hashMode // уже нормализован в Run (auto_api); auto_js сюда не доходит
-	resolver := newProtectedResolver("", protectPath)
+	if strings.TrimSpace(persisted.VKToken) == "" && strings.TrimSpace(persisted.DeviceID) == "" &&
+		len(persisted.AutoHashes) == 0 && len(persisted.ManualHashes) == 0 {
+		persisted = restoreSavedState(moduleState)
+	}
+	if cached, ok := takeCachedAutoHashes(); ok {
+		left := autoHashesTTL - time.Since(time.Unix(persisted.AutoHashesAt, 0))
+		emitLog("qWDTT: auto hashes cache hit · %d · TTL left %s — no calls.start", len(cached), left.Truncate(time.Second))
+		return cached, nil, nil
+	}
+	csv := qwdtt.ProtectDNSCsv(dnsPreset, hostDNSServers())
+	resolver := newProtectedResolver(csv, protectPath)
 	configureVkHTTP(protectPath, resolver)
 	s := csqttStringsFor("") // язык уже в логах qWDTT; строки OAuth — дефолт
 	tok, terr := ensureVkToken(moduleState, profileDir, s, resolver)
 	if terr != nil {
 		return nil, nil, terr
+	}
+	if len(persisted.AutoHashes) > 0 {
+		emitLog("qWDTT: auto hashes cache expired — refresh via calls.start")
+		expireAutoHashes(tok)
 	}
 	emitProgress("%s", s.vkAutoAPIProgress)
 	started, aerr := startVkAutoCallsCount(tok, wantHashes)
@@ -92,8 +108,9 @@ func qwdttAutoHashes(profileDir, protectPath, moduleState string, wantHashes int
 		}
 		return nil, nil, aerr
 	}
-	cleanup := func() { finishVkAutoCalls(tok, started.Calls) }
-	return started.Hashes, cleanup, nil
+	storeAutoHashes(started)
+	// cleanup=nil: не forceFinish — хеши переиспользуются до TTL.
+	return started.Hashes, nil, nil
 }
 
 func realMain(configContent, resolversPath, profileDir, protectPath string, listenFd int) int {

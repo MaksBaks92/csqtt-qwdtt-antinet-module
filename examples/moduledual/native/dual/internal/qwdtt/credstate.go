@@ -196,6 +196,7 @@ func LoadRestoredCreds(blobB64, link, startReason string) {
 	// живое расследование («почему после kill -9 пошла полная VK-цепочка?») свелось к
 	// ручному декодированию блобов из лога и сверке отпечатков — ровно потому, что модуль не
 	// сказал ни слова о том, что и почему отклонил.
+	HydrateTurnFromModuleState(blobB64)
 	if startReason == "cold" {
 		log.Printf("[VK Auth] MODULE_STATE: START_REASON=cold - restore not applied")
 		return
@@ -263,6 +264,35 @@ func LoadRestoredCreds(blobB64, link, startReason string) {
 	_ = os.Stdout.Sync()
 }
 
+// HydrateTurnFromModuleState — вытащить TURN-поля из блоба в lastTurnFields, чтобы
+// helper persistState не затирал их при записи vk_token/auto_hashes.
+func HydrateTurnFromModuleState(blobB64 string) {
+	blobB64 = strings.TrimSpace(blobB64)
+	if blobB64 == "" {
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(blobB64)
+	if err != nil || len(raw) == 0 {
+		raw = []byte(blobB64)
+	}
+	var pc persistedCreds
+	if err := json.Unmarshal(raw, &pc); err != nil {
+		return
+	}
+	if pc.Username == "" || len(pc.ServerAddrs) == 0 {
+		return
+	}
+	rememberTurnState(map[string]any{
+		"l": pc.LinkFP,
+		"h": pc.HashFP,
+		"u": pc.Username,
+		"p": pc.Password,
+		"a": pc.ServerAddrs,
+		"e": pc.ExpiresUnix,
+		"t": pc.AcquiredUnix,
+	})
+}
+
 // publishTurnSeed mirrors restored/fresh creds into the dual-wide vk cache (csqtt can seed rust).
 func publishTurnSeed(hash string, c TurnCredentials, expUnix int64) {
 	if hash == "" {
@@ -312,19 +342,58 @@ func SaveCredsToHost(c TurnCredentials) {
 	// Годность блоба = VK-expiry − запас (тот же горизонт, что in-memory кэш после
 	// credsCacheExpiresAt). Раньше ExpiresAt был ~9 мин, а сюда подставляли VK-срок отдельно.
 	expUnix := credsCacheExpiresAt(c.Username).Unix()
-	body, err := json.Marshal(persistedCreds{
-		LinkFP:       stateLinkFP(),                // ссылка МОДУЛЯ (см. развёрнутый коммент выше)
-		HashFP:       credsLinkFingerprint(c.Link), // c.Link здесь = VK-хеш звонка, а не ссылка
-		Username:     c.Username,
-		Password:     c.Password,
-		ServerAddrs:  c.ServerAddrs,
-		ExpiresUnix:  expUnix,
-		AcquiredUnix: time.Now().Unix(),
-	})
+	turn := map[string]any{
+		"l": stateLinkFP(),                // ссылка МОДУЛЯ (см. развёрнутый коммент выше)
+		"h": credsLinkFingerprint(c.Link), // c.Link здесь = VK-хеш звонка, а не ссылка
+		"u": c.Username,
+		"p": c.Password,
+		"a": c.ServerAddrs,
+		"e": expUnix,
+		"t": time.Now().Unix(),
+	}
+	rememberTurnState(turn)
+	m := make(map[string]any, len(turn)+8)
+	for k, v := range turn {
+		m[k] = v
+	}
+	if extraModuleStateFn != nil {
+		for k, v := range extraModuleStateFn() {
+			m[k] = v
+		}
+	}
+	body, err := json.Marshal(m)
 	if err != nil {
 		return
 	}
 	publishTurnSeed(c.Link, c, expUnix)
 	fmt.Printf("STATE_SAVE|%s\n", base64.StdEncoding.EncodeToString(body))
 	_ = os.Stdout.Sync()
+}
+
+var (
+	lastTurnMu     sync.Mutex
+	lastTurnFields map[string]any
+)
+
+func rememberTurnState(turn map[string]any) {
+	lastTurnMu.Lock()
+	defer lastTurnMu.Unlock()
+	lastTurnFields = make(map[string]any, len(turn))
+	for k, v := range turn {
+		lastTurnFields[k] = v
+	}
+}
+
+// LastTurnStateFields — последний TURN-снимок для слияния в helper persistState.
+func LastTurnStateFields() map[string]any {
+	lastTurnMu.Lock()
+	defer lastTurnMu.Unlock()
+	if len(lastTurnFields) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(lastTurnFields))
+	for k, v := range lastTurnFields {
+		out[k] = v
+	}
+	return out
 }

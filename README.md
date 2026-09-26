@@ -17,10 +17,9 @@
 
 ## Настройки по схемам
 
-В `module.json` у части settings есть поле `schemes: ["csqtt"]` или `["qwdtt"]`
-(например `connMode` / raw только для qWDTT). Хост AntiNet, который читает `schemes`,
-скрывает чужие контролы на карточке конфига. Общие ключи (`vkHash*`, `vkAuthMode`,
-`dialTimeoutSec`, …) без `schemes` — видны обеим схемам.
+В `module.json` общие настройки сверху; блоки **CSQTT** / **qWDTT** —
+переключатели (`panelCsqtt` / `panelQwdtt`), по нажатию раскрывают поля схемы
+через `visibleWhen`. Helper читает те же `SETTING_*`, что и раньше.
 
 ## Общие TURN-креды
 

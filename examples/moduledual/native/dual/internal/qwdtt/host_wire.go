@@ -11,16 +11,22 @@ type HostHooks struct {
 	ProtectFromOomKill func()
 }
 
-// AutoHashesFunc — создать wantHashes звонков VK (calls.start) для добора под число
-// групп воркеров. cleanup завершает только созданные звонки (calls.forceFinish).
-type AutoHashesFunc func(profileDir, protectPath, moduleState string, wantHashes int, hashMode string) (hashes []string, cleanup func(), err error)
+// AutoHashesFunc — создать wantHashes звонков VK (calls.start), только когда в ссылке
+// нет хешей вовсе и нет валидного кеша. dnsPreset — SETTING_dnsPreset (DoH → UDP в ProtectDNSCsv).
+// cleanup опционален (обычно nil): forceFinish только при замене протухшего кеша, не на каждый стоп.
+type AutoHashesFunc func(profileDir, protectPath, moduleState, dnsPreset string, wantHashes int, hashMode string) (hashes []string, cleanup func(), err error)
 
 var hooks HostHooks
 var autoHashesFn AutoHashesFunc
+var extraModuleStateFn func() map[string]any
 
 func WireHost(h HostHooks) { hooks = h }
 
 func WireAutoHashes(fn AutoHashesFunc) { autoHashesFn = fn }
+
+// WireExtraModuleState — поля helper (vk_token, auto_hashes, …) для слияния в STATE_SAVE
+// вместе с TURN-кредами, чтобы один блоб не затирал другой.
+func WireExtraModuleState(fn func() map[string]any) { extraModuleStateFn = fn }
 
 func emitProgress(format string, args ...any) {
 	if hooks.EmitProgress != nil {

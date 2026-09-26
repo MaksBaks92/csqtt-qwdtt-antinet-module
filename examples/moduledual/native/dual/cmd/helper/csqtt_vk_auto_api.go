@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 //
 // Авто API как в клиенте CSQTT: POST api.vk.com/method/calls.start (fallback api.vk.ru),
-// хеши из ok_join_link / join_link, при остановке calls.forceFinish.
+// хеши из ok_join_link / join_link. Кеш в MODULE_STATE до TTL; forceFinish — только
+// при замене протухшего набора, не на каждый стоп сессии.
 
 package main
 
@@ -19,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"dual-antinet/internal/qwdtt"
 )
 
 const (
@@ -40,10 +43,11 @@ var (
 )
 
 func configureVkHTTP(protectPath string, resolver *protectedResolver) {
-	// Empty DNS_SERVERS → systemResolver under protect (dnsshim). Never hardcode public DNS
-	// and never fall through to net.DefaultResolver (MODULE_API §4 — DNS и protect).
+	// Empty DNS → PreferDNSCsv / hostDNS before calling; never leave Android with
+	// systemDNSServers()=[] → errNoDNSServers on api.vk.ru. Never use net.DefaultResolver
+	// (MODULE_API §4 — DNS и protect).
 	if resolver == nil {
-		resolver = newProtectedResolver("", protectPath)
+		resolver = newProtectedResolver(qwdtt.ProtectDNSCsv("google", hostDNSServers()), protectPath)
 	}
 	dialer := &net.Dialer{
 		Timeout:   8 * time.Second,
