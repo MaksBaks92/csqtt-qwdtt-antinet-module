@@ -295,11 +295,19 @@ func stripVkCallURL(raw string) string {
 // Manual hashes only. Auto API / Auto VK create their own and ignore these.
 // Shared policy: dual-antinet/internal/vk (CSQTT hash collection).
 func collectManualHashes(cfg map[string]string, linkHashes []string) []string {
-	out := vk.CollectHashes(linkHashes, cfg)
+	out := vk.CollectHashesFor(linkHashes, cfg, "csqtt")
 	if len(out) > maxVkHashes {
 		return out[:maxVkHashes]
 	}
 	return out
+}
+
+// settingPrefer — scheme-specific SETTING_ key, fallback to legacy shared key.
+func settingPrefer(cfg map[string]string, primary, fallback string) string {
+	if v := strings.TrimSpace(cfg[primary]); v != "" {
+		return v
+	}
+	return strings.TrimSpace(cfg[fallback])
 }
 
 func normalizeCsqtt(raw string) string {
@@ -405,7 +413,7 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 		emitStatus(statusFatal, "bad link")
 		log.Fatalf("parse LINK: %v", err)
 	}
-	workers, _ := strconv.Atoi(strings.TrimSpace(cfg["SETTING_workers"]))
+	workers, _ := strconv.Atoi(settingPrefer(cfg, "SETTING_csqttWorkers", "SETTING_workers"))
 	if workers <= 0 {
 		workers = 18
 	}
@@ -418,8 +426,12 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 	resolver := newProtectedResolver(dnsCSV, protectPath)
 	configureVkHTTP(protectPath, resolver)
 
-	hashMode, authMode := normalizeVkModes(cfg["SETTING_hashMode"], cfg["SETTING_vkAuthMode"])
-	if normalizeHashMode(cfg["SETTING_hashMode"]) == "manual" && normalizeVkAuthMode(cfg["SETTING_vkAuthMode"]) == "auto_js" {
+	hashMode, authMode := normalizeVkModes(
+		settingPrefer(cfg, "SETTING_csqttHashMode", "SETTING_hashMode"),
+		settingPrefer(cfg, "SETTING_csqttAuthMode", "SETTING_vkAuthMode"),
+	)
+	if vk.NormalizeHashMode(settingPrefer(cfg, "SETTING_csqttHashMode", "SETTING_hashMode")) == "manual" &&
+		vk.NormalizeAuthMode(settingPrefer(cfg, "SETTING_csqttAuthMode", "SETTING_vkAuthMode")) == "auto_js" {
 		emitLog("CSQTT: Режим хешей=Ручной — «Авто ВК» в кредах отключён (движок требует Авто ВК и для хешей). Креды: Авто (vkcalls). Для аккаунтных TURN поставьте оба режима «Авто ВК».")
 	}
 	emitLog("CSQTT: режим хешей=%s · режим кредов=%s", hashMode, authModeLabel(authMode))

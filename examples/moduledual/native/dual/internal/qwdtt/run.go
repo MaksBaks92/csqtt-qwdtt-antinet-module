@@ -155,9 +155,8 @@ func Run(configContent, resolversPath, profileDir, protectPath string, listenFd 
 	// VK auth mode (SETTING_vkAuthMode) / anon path (SETTING_vkAnonPath) — см. vk_account.go. Пусто →
 	// дефолты уже заданы init()'ом этого пакета (anonymous/vkcalls) — вызовы ниже no-op в этом случае.
 	//
-	// Dual UI: value `legacy` в SETTING_vkAuthMode подписан «Капча (CSQTT)», а «Legacy token» —
-	// отдельный SETTING_vkAnonPath. Юзеры часто включают первое, ожидая calls.getAnonymousToken.
-	// Для qWDTT оба означают один путь — форсируем anon-path=legacy.
+	// Dual UI: qwdttAuthMode = anonymous|account. Legacy SETTING_vkAuthMode=legacy
+	// (старый смешанный enum) → anon-path=legacy.
 	anonPath := cfg.VkAnonPath
 	if strings.EqualFold(strings.TrimSpace(cfg.VkAuthMode), "legacy") {
 		anonPath = "legacy"

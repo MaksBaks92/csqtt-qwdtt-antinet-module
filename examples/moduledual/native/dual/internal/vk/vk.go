@@ -97,6 +97,24 @@ func splitHashField(raw string) []string {
 
 // SettingsHashes reads SETTING_vkHash1..4 (and legacy SETTING_vkHashes CSV).
 func SettingsHashes(cfg map[string]string) []string {
+	return SettingsHashesFor(cfg, "")
+}
+
+// SettingsHashesFor — хеши схемы. prefix "csqtt" → SETTING_csqttHash1..4,
+// "qwdtt" → SETTING_qwdttHash1..4; пустой — только legacy vkHash*.
+// Если у prefix ничего нет — fallback на vkHash1..4 / vkHashes (миграция со старых UI).
+func SettingsHashesFor(cfg map[string]string, prefix string) []string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix != "" {
+		var raw []string
+		for i := 1; i <= 4; i++ {
+			raw = append(raw, cfg[fmt.Sprintf("SETTING_%sHash%d", prefix, i)])
+		}
+		out := dedupe(splitHashField(strings.Join(raw, ",")))
+		if len(out) > 0 {
+			return out
+		}
+	}
 	var raw []string
 	for i := 1; i <= 4; i++ {
 		raw = append(raw, cfg[fmt.Sprintf("SETTING_vkHash%d", i)])
@@ -107,11 +125,16 @@ func SettingsHashes(cfg map[string]string) []string {
 
 // CollectHashes merges link hashes with settings hashes (link first, then settings). Dedupes.
 func CollectHashes(linkHashes []string, cfg map[string]string) []string {
+	return CollectHashesFor(linkHashes, cfg, "")
+}
+
+// CollectHashesFor — как CollectHashes, но settings hashes берутся для prefix схемы.
+func CollectHashesFor(linkHashes []string, cfg map[string]string, prefix string) []string {
 	var all []string
 	for _, h := range linkHashes {
 		all = append(all, NormalizeHashToken(h))
 	}
-	all = append(all, SettingsHashes(cfg)...)
+	all = append(all, SettingsHashesFor(cfg, prefix)...)
 	return dedupe(all)
 }
 

@@ -35,20 +35,20 @@ import (
 // См. MODULE_API §4.
 
 type helperConfig struct {
-	Peer      string `json:"peer"`
-	Hashes    string `json:"hashes"`
-	Workers   int    `json:"workers"`
-	Password  string `json:"password"`
-	LocalPort int    `json:"localPort"`
-	SocksPort int    `json:"socksPort"`
-	SocksUser string `json:"socksUser"`
-	SocksPass string `json:"socksPass"`
-	RelayWindowSec int `json:"relayWindowSec"` // окно детекта обрыва релея (relayWatchdog); 0 = дефолт
-	CaptchaMode string `json:"captchaMode"`     // SETTING_captchaMode (карточка «Модули»): auto/rjs/wv; "" = auto
-	VkAuthMode  string `json:"vkAuthMode"`      // SETTING_vkAuthMode: anonymous/account; "" = anonymous (см. vk_account.go)
-	VkAnonPath  string `json:"vkAnonPath"`      // SETTING_vkAnonPath: vkcalls/legacy; "" = vkcalls (см. vk_account.go)
-	HashMode    string `json:"hashMode"`        // SETTING_hashMode: manual/auto_api/auto_js; "" = manual
-	DnsPreset   string `json:"dnsPreset"`       // SETTING_dnsPreset: yandex/cloudflare/google/doh-cloudflare/doh-google; "" = yandex
+	Peer           string `json:"peer"`
+	Hashes         string `json:"hashes"`
+	Workers        int    `json:"workers"`
+	Password       string `json:"password"`
+	LocalPort      int    `json:"localPort"`
+	SocksPort      int    `json:"socksPort"`
+	SocksUser      string `json:"socksUser"`
+	SocksPass      string `json:"socksPass"`
+	RelayWindowSec int    `json:"relayWindowSec"` // окно детекта обрыва релея (relayWatchdog); 0 = дефолт
+	CaptchaMode    string `json:"captchaMode"`    // SETTING_captchaMode (карточка «Модули»): auto/rjs/wv; "" = auto
+	VkAuthMode     string `json:"vkAuthMode"`     // SETTING_vkAuthMode: anonymous/account; "" = anonymous (см. vk_account.go)
+	VkAnonPath     string `json:"vkAnonPath"`     // SETTING_vkAnonPath: vkcalls/legacy; "" = vkcalls (см. vk_account.go)
+	HashMode       string `json:"hashMode"`       // SETTING_hashMode: manual/auto_api/auto_js; "" = manual
+	DnsPreset      string `json:"dnsPreset"`      // SETTING_dnsPreset: yandex/cloudflare/google/doh-cloudflare/doh-google; "" = yandex
 	// WorkersSource — откуда взяли cfg.Workers (для лога): "setting" | "default".
 	WorkersSource string `json:"-"`
 	// ─── Транспортные режимы, добавленные автором в 1.4.3 (см. TurnParams в group.go) ───
@@ -65,10 +65,10 @@ type helperConfig struct {
 	DirectPort int `json:"directPort"` // SETTING_directPort: порт сервера `-listen-direct`
 	RawPort    int `json:"rawPort"`    // SETTING_rawPort:    порт сервера `-listen-raw`
 	// antinet §4 — контракт восстановления состояния (credstate.go).
-	DialTimeoutSec int `json:"dialTimeoutSec"` // потолок дозвона SOCKS5 до цели; 0 = дефолт 10с
-	StartReason string `json:"startReason"` // cold | resume | handover; "" (старый хост) = cold
-	ModuleState string `json:"moduleState"` // base64-блоб НАШЕГО состояния прошлой сессии, от хоста
-	AppLang     string `json:"appLang"`     // APP_LANG (MODULE_API §2.9) — эффективный язык AntiNet, см. qwS ниже
+	DialTimeoutSec int    `json:"dialTimeoutSec"` // потолок дозвона SOCKS5 до цели; 0 = дефолт 10с
+	StartReason    string `json:"startReason"`    // cold | resume | handover; "" (старый хост) = cold
+	ModuleState    string `json:"moduleState"`    // base64-блоб НАШЕГО состояния прошлой сессии, от хоста
+	AppLang        string `json:"appLang"`        // APP_LANG (MODULE_API §2.9) — эффективный язык AntiNet, см. qwS ниже
 	// ⚠ Поля под generic-ключ `DEVICE_ID` здесь НЕТ намеренно: модуль выводит идентичность
 	// устройства сам (`deviceIDFor`, run.go). Неиспользуемое поле в конфиге — двойник, который
 	// однажды прочитают по ошибке.
@@ -96,7 +96,7 @@ const (
 	// DTLS-порт — режим не мог заработать ни при какой конфигурации сервера.
 	defaultDirectPort = 56002
 	defaultRawPort    = 56003
-	defaultLocalPort = 9000
+	defaultLocalPort  = 9000
 	// Дефолт при отсутствии SETTING_workers — авторский дефолт CLI (`flag.Int("n", 9, …)`).
 	// Число НЕ обязано быть кратным `workersPerGroup`: разбивку делает runTransport ceiling-делением
 	// с клампингом последней группы, как у автора.
@@ -300,8 +300,12 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 	var cfg helperConfig
 	var link string
 	var settingHashRaw []string
-	var settingWorkers int // SETTING_workers — единственный источник числа воркеров (UI)
+	var settingWorkers int // UI воркеры (qwdttWorkers ?: workers)
 	var settingHashMode string
+	var qwdttWorkers int
+	var qwdttHashMode string
+	var qwdttAuthMode string
+	var qwdttHashRaw []string
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		eq := strings.IndexByte(line, '=')
@@ -322,10 +326,14 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 			cfg.CaptchaMode = v
 		case "SETTING_vkAuthMode":
 			cfg.VkAuthMode = v
+		case "SETTING_qwdttAuthMode":
+			qwdttAuthMode = v
 		case "SETTING_vkAnonPath":
 			cfg.VkAnonPath = v
 		case "SETTING_hashMode":
 			settingHashMode = v
+		case "SETTING_qwdttHashMode":
+			qwdttHashMode = v
 		case "SETTING_dnsPreset":
 			cfg.DnsPreset = v
 		case "SETTING_connMode":
@@ -339,15 +347,21 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 		case "SETTING_rawPort":
 			cfg.RawPort, _ = strconv.Atoi(v)
 		case "SETTING_workers":
-			// UI «Воркеры». workers= в ссылке игнорируется (см. ниже).
+			// legacy shared UI «Воркеры».
 			if w, e := strconv.Atoi(strings.TrimSpace(v)); e == nil && w > 0 {
 				settingWorkers = w
+			}
+		case "SETTING_qwdttWorkers":
+			if w, e := strconv.Atoi(strings.TrimSpace(v)); e == nil && w > 0 {
+				qwdttWorkers = w
 			}
 		case "SETTING_dialTimeoutSec":
 			// antinet: потолок дозвона SOCKS5 до цели (socks5.go). 0/пусто → дефолт 10с.
 			cfg.DialTimeoutSec, _ = strconv.Atoi(v)
 		case "SETTING_vkHash1", "SETTING_vkHash2", "SETTING_vkHash3", "SETTING_vkHash4", "SETTING_vkHashes":
 			settingHashRaw = append(settingHashRaw, v)
+		case "SETTING_qwdttHash1", "SETTING_qwdttHash2", "SETTING_qwdttHash3", "SETTING_qwdttHash4":
+			qwdttHashRaw = append(qwdttHashRaw, v)
 		case "START_REASON":
 			// antinet §4.1 п.3 — cold | resume | handover. Хост лишь называет повод; годность
 			// восстановленного состояния решаем мы сами (§4.1 п.4), см. credstate.go.
@@ -360,6 +374,18 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 		case "LINK":
 			link = v
 		}
+	}
+	if qwdttWorkers > 0 {
+		settingWorkers = qwdttWorkers
+	}
+	if strings.TrimSpace(qwdttHashMode) != "" {
+		settingHashMode = qwdttHashMode
+	}
+	if strings.TrimSpace(qwdttAuthMode) != "" {
+		cfg.VkAuthMode = qwdttAuthMode
+	}
+	if len(qwdttHashRaw) > 0 {
+		settingHashRaw = append(qwdttHashRaw, settingHashRaw...)
 	}
 	if link == "" {
 		return cfg, fmt.Errorf("no LINK in config")
@@ -384,9 +410,14 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 		return cfg, fmt.Errorf("LINK missing peer")
 	}
 	cfg.HashMode = vk.NormalizeHashMode(settingHashMode)
-	// Shared VK layer (CSQTT policy): settings hashes + link hashes.
+	// Settings hashes: qwdttHash* first (scheme panel), then legacy vkHash*.
 	settingsMap := map[string]string{"SETTING_vkHashes": strings.Join(settingHashRaw, ",")}
-	merged := vk.CollectHashes(vk.ParseHashList(hashes), settingsMap)
+	for i, h := range qwdttHashRaw {
+		if i < 4 {
+			settingsMap[fmt.Sprintf("SETTING_qwdttHash%d", i+1)] = h
+		}
+	}
+	merged := vk.CollectHashesFor(vk.ParseHashList(hashes), settingsMap, "qwdtt")
 	if len(merged) == 0 {
 		// Нет хешей в ссылке/настройках. «Ручной» без материала невозможен — Авто API
 		// (создадим звонки в Run). Явный manual + пустые хеши раньше валил старт целиком.
@@ -493,16 +524,16 @@ func (w progressWriter) Write(p []byte) (int, error) {
 // `log.Printf`/внутренняя dev-диагностика (не PROGRESS|/LOG|), включая debugSilenceWatcher'а —
 // dev-only симуляция, недостижимая обычным юзером, — остаются английскими намеренно.
 type qwdttStrings struct {
-	wrongPassword       string
+	wrongPassword string
 	// Сервер не подтвердил WRAP/DTLS. Отдельная строка, а НЕ переиспользование wrongPassword:
 	// таймаут WRAP означает «пароль не подтверждён», что покрывает и неверный пароль, и молчащий
 	// сервер — врать «пароль неверный» там, где сервер просто лёг, значит отправить юзера
 	// перевыпускать рабочий ключ. Текст называет обе причины и говорит, что делать.
-	wrapNotConfirmed    string
-	vkDnsUnreachable    string
-	solvingCaptcha      string
-	vkAccessObtained    string
-	establishingDtls    string
+	wrapNotConfirmed string
+	vkDnsUnreachable string
+	solvingCaptcha   string
+	vkAccessObtained string
+	establishingDtls string
 	// establishingDirect — прямой режим бампа 1.4.3 (`tp.NoDTLS`/`tp.RawMode`): DTLS-слоя нет
 	// вовсе. Отдельная строка, а не переиспользование establishingDtls: юзер сам выбрал режим
 	// настройкой, и показывать ему «Устанавливаю DTLS-туннель…» там, где DTLS сознательно снят,

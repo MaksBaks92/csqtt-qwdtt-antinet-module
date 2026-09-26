@@ -17,9 +17,9 @@
 
 ## Настройки по схемам
 
-В `module.json` общие настройки сверху; блоки **CSQTT** / **qWDTT** —
-переключатели (`panelCsqtt` / `panelQwdtt`), по нажатию раскрывают поля схемы
-через `visibleWhen`. Helper читает те же `SETTING_*`, что и раньше.
+В `module.json` общие только таймаут и Device ID. Блоки **CSQTT** / **qWDTT**
+(`panelCsqtt` / `panelQwdtt`) — полные независимые наборы ключей (`csqttWorkers` /
+`qwdttWorkers`, свои хеши, auth, капча только у qWDTT и т.д.), без пересечения протоколов.
 
 ## Общие TURN-креды
 
