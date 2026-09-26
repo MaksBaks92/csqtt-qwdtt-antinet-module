@@ -12,7 +12,7 @@
   "description": "Два протокола в одном модуле: csqtt:// и qwdtt://. Общие только таймаут и Device ID; всё остальное — в раскрываемых блоках CSQTT и qWDTT без пересечений.",
   "homepage": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module",
   "updateUrl": "https://raw.githubusercontent.com/MaksBaks92/csqtt-qwdtt-antinet-module/main/antinet-module.json",
-  "version": "0.2.16-dual",
+  "version": "0.2.17-dual",
   "license": "GPL-3.0-or-later (combined helper); CSQTT portions PolyForm-Noncommercial — see NOTICE",
   "handoverMode": "signal",
   "hostEvents": [

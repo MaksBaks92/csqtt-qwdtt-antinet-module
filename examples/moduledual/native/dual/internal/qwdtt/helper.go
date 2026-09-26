@@ -769,14 +769,16 @@ func runTransportSupervised(rootCtx context.Context, tp *TurnParams, peer *net.U
 	// супервизорной горутиной прямо перед её собственным return'ом.
 	giveUpCh := make(chan struct{})
 
+	// netPaused — host netlost (or self-detected offline). Supervisor waits; no TURN respawn.
+	var netPaused int32
+	var pendingRespawn int32 // heal requested while paused → apply on netback
+
 	// Транспорт TURN/DTLS-воркеров под СУПЕРВИЗОРОМ — пере-спавним в ДВУХ случаях (оба → re-spawn
 	// `runTransport` с НОВЫМИ TURN-сокетами на ТЕКУЩЕЙ сети через protectedDialUDP→protect-callback
 	// хоста, переиспользуя in-memory кэш VK-кредов (VK-expiry ≈ часы) → БЕЗ капчи, пока креды валидны; WG-device/
 	// dispatcher/SOCKS на 127.0.0.1 НЕ трогаются — переживают, WG не ре-handshake, dispatcher.Shutdown
 	// НЕ закрывает localConn):
-	//   (1) ХЕНДОВЕР — событие `handover` от хоста (MODULE_API §2.8; C-ABI на Android, stdin на
-	//       десктопе): handler ниже cancel'ит ctx текущего поколения → runTransport возвращается
-	//       (tctx.Err()!=nil) → немедленный re-spawn.
+	//   (1) ХЕНДОВЕР / netback / stall / смена underlay IP — cancel ctx поколения → re-spawn.
 	//   (2) ЕСТЕСТВЕННАЯ СМЕРТЬ — ВСЕ воркеры вышли терминально (хеш мёртв/FATAL_AUTH/STUN-death) при
 	//       ЖИВОМ процессе → runTransport вернулся сам (tctx.Err()==nil). Без супервизора helper висел
 	//       бы с 0 воркеров (watchdog молчит — процесс жив; reconnect реюзит живой процесс). Backoff+cap:
@@ -791,6 +793,13 @@ func runTransportSupervised(rootCtx context.Context, tp *TurnParams, peer *net.U
 			if rootCtx.Err() != nil {
 				return
 			}
+			// Wi-Fi↔4G: не крутить GetCreds/TURN пока сети нет (netlost).
+			for atomic.LoadInt32(&netPaused) != 0 {
+				if rootCtx.Err() != nil {
+					return
+				}
+				time.Sleep(400 * time.Millisecond)
+			}
 			tctx, tcancel := context.WithCancel(rootCtx)
 			txMu.Lock()
 			txCancel = tcancel
@@ -801,8 +810,11 @@ func runTransportSupervised(rootCtx context.Context, tp *TurnParams, peer *net.U
 			if rootCtx.Err() != nil {
 				return
 			}
-			if tctx.Err() != nil { // (1) МЫ отменили (хендовер ИЛИ relayWatchdog) → немедленный re-spawn
+			if tctx.Err() != nil { // (1) МЫ отменили (хендовер / netback / watchdog) → немедленный re-spawn
 				fastDeaths = 0
+				if atomic.LoadInt32(&netPaused) != 0 {
+					continue // wait loop above
+				}
 				emitProgress("%s", qwS.reestablishing)
 				continue
 			}
@@ -844,10 +856,12 @@ func runTransportSupervised(rootCtx context.Context, tp *TurnParams, peer *net.U
 
 	// requestTransportRespawn — ЕДИНЫЙ триггер пере-спавна транспорта (cancel ctx текущего поколения →
 	// супервизор выше, tctx.Err()!=nil, немедленно пере-спавнит TURN/DTLS на ТЕКУЩЕЙ сети, реюз кэша
-	// кредов → без капчи). ДВА потребителя (единая логика, не два single-purpose пути): (1) хендовер
-	// (событие хоста `handover`, канон shared/hostproto) и (2) relayWatchdog (молчащий релей при
-	// живых воркерах).
+	// кредов → без капчи). Потребители: handover/netback/stall, own netwatch, relayWatchdog.
 	requestTransportRespawn := func() {
+		if atomic.LoadInt32(&netPaused) != 0 {
+			atomic.StoreInt32(&pendingRespawn, 1)
+			return
+		}
 		txMu.Lock()
 		c := txCancel
 		txMu.Unlock()
@@ -856,19 +870,56 @@ func runTransportSupervised(rootCtx context.Context, tp *TurnParams, peer *net.U
 		}
 	}
 
-	// Хендовер (MODULE_API §2.8) — ДВА транспорта, ОДНА реакция, оба сходятся в
-	// handleHostEvent("handover") → hostEventHandler:
-	//   • Android — C-ABI `antinet_module_event("handover")` (канон shared/entry);
-	//   • десктоп — строка `handover` в stdin (`startHostEventReader`, канон shared/lifecycle).
-	// Третьего пути нет и обработчик SIGUSR1 заводить не надо — сигнала не шлёт ни один хост (на
-	// Android он в слот-процессе под ART недетерминирован, на десктопе хост пишет в stdin).
-	// ⚠ Грабля этого места: звать requestTransportRespawn НАПРЯМУЮ из сигнального обработчика,
-	// минуя handleHostEvent, нельзя — тот должен иметь generic-ветку для
-	// не-ACTION_RESULT строк, поэтому реальные события хоста молча дропались.
+	resumeFromNetlost := func(source string) {
+		was := atomic.SwapInt32(&netPaused, 0)
+		atomic.StoreInt32(&pauseFlag, 0)
+		if was != 0 {
+			log.Printf("[HELPER] %s — сеть снова есть, снимаю паузу", source)
+			emitProgress("%s", qwS.reestablishing)
+		}
+		need := atomic.SwapInt32(&pendingRespawn, 0) != 0 || was != 0 || source == "handover" || source == "stall" || source == "netchange"
+		if need {
+			txMu.Lock()
+			c := txCancel
+			txMu.Unlock()
+			if c != nil {
+				c()
+			}
+		}
+	}
+
+	// Desktop: stdin events. Android: C-ABI antinet_module_event. Must start reader once.
+	if startHostEventReader != nil {
+		startHostEventReader()
+	}
+
+	// Хендовер (MODULE_API §2.8) — handover/netlost/netback/stall (объявлены в hostEvents).
+	// Раньше обрабатывался только handover → Wi-Fi↔4G через netlost/netback не поднимал TURN.
 	setHostEventHandler(func(event string) {
+		event = strings.TrimSpace(event)
+		if isDNSHostEvent(event) {
+			return // rememberHostDNSServers уже в handleHostEvent
+		}
 		switch event {
+		case "netlost":
+			atomic.StoreInt32(&netPaused, 1)
+			atomic.StoreInt32(&pauseFlag, 1)
+			atomic.StoreInt32(&pendingRespawn, 1)
+			log.Printf("[HELPER] netlost — пауза TURN (жду netback / свою сеть)")
+			emitProgress("%s", "Network lost — pausing…")
+			txMu.Lock()
+			c := txCancel
+			txMu.Unlock()
+			if c != nil {
+				c() // drop stale underlay sockets; supervisor waits on netPaused
+			}
+		case "netback":
+			resumeFromNetlost("netback")
 		case "handover":
-			requestTransportRespawn()
+			resumeFromNetlost("handover")
+		case "stall":
+			// Host probes only when a network exists; if still paused, netback was lost.
+			resumeFromNetlost("stall")
 		case "stop":
 			// Хост сейчас нас убьёт и даёт короткое окно на прощание (MODULE_API §2.8).
 			// Тело — общее с самоликвидацией watchdog'а, см. shutdownModule.
@@ -876,10 +927,26 @@ func runTransportSupervised(rootCtx context.Context, tp *TurnParams, peer *net.U
 		}
 	})
 
+	// Свой детектор Wi-Fi↔cellular: не зависеть от netback хоста.
+	startNetChangeMonitor(rootCtx, peer, func(from, to string) {
+		if atomic.LoadInt32(&netPaused) != 0 {
+			// Offline hold: treat as pending heal; netback/resume will respawn.
+			atomic.StoreInt32(&pendingRespawn, 1)
+			return
+		}
+		log.Printf("[HELPER] network change %s → %s — transport respawn", from, to)
+		emitProgress("%s", qwS.reestablishing)
+		requestTransportRespawn()
+	})
+
 	// relayWatchdog — backstop здоровья релея (тип ниже): устойчивый обрыв релея при ЖИВЫХ воркерах
 	// (наш инцидент: socks5 code=4 ~16мин при «Активных: 9» — ядро автора это НЕ ловит) →
 	// детект по PONG'у (session.go Reader пишет relayPongNano) → НЕМЕДЛЕННЫЙ supervisor re-spawn. Свой тикер.
-	relayWD := &relayWatchdog{respawn: requestTransportRespawn, stats: stats}
+	relayWD := &relayWatchdog{
+		respawn: requestTransportRespawn,
+		stats:   stats,
+		paused:  &netPaused,
+	}
 	// ⚠ Kept deliberately (relayWatchdogTick=15s, see its own doc-comment). A clean A/B confirmed
 	// that FULLY disabling this goroutine does NOT additionally help a stuck production cascade
 	// beyond what the 15s tick already gives (both still hit "context deadline exceeded") — the
@@ -1069,9 +1136,9 @@ var configRequestBudget = 12 * time.Second
 // Сигнал — счётчики САМОГО ТУННЕЛЯ (`Stats.TotalBytesDown/Up`, их ведёт диспетчер: `down` растёт в
 // writeLoop на каждом пакете, который воркеры приняли с релея и он записал в туннель, `up` — в
 // readLoop на каждом пакете, ушедшем из туннеля наружу):
-//   • down вырос          → релей реально донёс трафик, он ЖИВ                 → сброс;
-//   • up вырос, down НЕТ  → шлём (в т.ч. ретрансмиты TCP), не получаем ничего  → тик молчания;
-//   • не вырос ни один    → простой, слать нечего                              → сброс (idle-safe,
+//   - down вырос          → релей реально донёс трафик, он ЖИВ                 → сброс;
+//   - up вырос, down НЕТ  → шлём (в т.ч. ретрансмиты TCP), не получаем ничего  → тик молчания;
+//   - не вырос ни один    → простой, слать нечего                              → сброс (idle-safe,
 //     то же свойство, ради которого выбран и handshake-сигнал: ложняка на простое быть не должно).
 //
 // ⚠ Источник сменён 2026-09-11 (было: rx/tx WG-пиров через UAPI wireguard-go, `relayByteSnapshot`).
@@ -1176,6 +1243,8 @@ type relayWatchdog struct {
 	// печатает `[STATS]`: отдельного учёта для watchdog'а не заводим, иначе появилось бы два
 	// представления одного и того же трафика, и расходились бы они молча.
 	stats *Stats
+	// paused — netlost hold (1). Не жжём re-spawn офлайн.
+	paused *int32
 
 	// Состояние второго сигнала. Трогается ТОЛЬКО из run() (одна горутина), но живёт под тем же
 	// мьютексом — цена на 3с-тике нулевая, а инвариант «всё состояние watchdog'а под одним локом» целее.
@@ -1242,6 +1311,9 @@ func (w *relayWatchdog) run(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		if w.paused != nil && atomic.LoadInt32(w.paused) != 0 {
+			continue // netlost — не жжём cold-start / handshake respawn
+		}
 		// Пер-воркерный снимок раз в 5 тиков (~15с) — ДИАГНОСТИКА, не сигнал (см. workerhealth.go).
 		// Нужен, чтобы отличить два невидимых механизма потерь: молчащий воркер (tx>0, rx=0) от
 		// дропов диспетчера в `!sent`-ветке. Последние выводятся арифметически: WG отдал wgTx, а
@@ -1303,6 +1375,9 @@ func (w *relayWatchdog) onHealthy() {
 // onSilent — общий исход ОБОИХ сигналов. `reason` только для лога: раньше строка FIRE жёстко писала
 // «WG handshake stuck», и после появления второго сигнала (rx/tx) вводила бы в заблуждение при разборе.
 func (w *relayWatchdog) onSilent(reason string) {
+	if w.paused != nil && atomic.LoadInt32(w.paused) != 0 {
+		return // netlost — ждём netback, не крутим TURN
+	}
 	w.mu.Lock()
 	if time.Since(w.lastRespawn) < relayRespawnCooldown {
 		w.mu.Unlock()
