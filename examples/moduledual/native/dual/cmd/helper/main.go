@@ -6,6 +6,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"syscall"
@@ -69,6 +70,29 @@ func wireQwdtt() {
 	qwdtt.WireActions(awaitActionResult)
 	qwdtt.WireHostEvents(setHostEventHandler, startHostEventReader)
 	qwdtt.WireStatusConsts("ready", statusOK, statusFatal)
+	qwdtt.WireAutoHashes(qwdttAutoHashes)
+}
+
+// qwdttAutoHashes — тот же Авто API, что у CSQTT (calls.start), когда в qwdtt-ссылке нет hashes=.
+func qwdttAutoHashes(profileDir, protectPath, moduleState string, workers int, hashMode string) ([]string, func(), error) {
+	_ = hashMode // уже нормализован в Run (auto_api); auto_js сюда не доходит
+	resolver := newProtectedResolver("", protectPath)
+	configureVkHTTP(protectPath, resolver)
+	s := csqttStringsFor("") // язык уже в логах qWDTT; строки OAuth — дефолт
+	tok, terr := ensureVkToken(moduleState, profileDir, s, resolver)
+	if terr != nil {
+		return nil, nil, terr
+	}
+	emitProgress("%s", s.vkAutoAPIProgress)
+	started, aerr := startVkAutoCalls(tok, workers)
+	if aerr != nil || len(started.Hashes) == 0 {
+		if aerr == nil {
+			aerr = fmt.Errorf("empty hash list")
+		}
+		return nil, nil, aerr
+	}
+	cleanup := func() { finishVkAutoCalls(tok, started.Calls) }
+	return started.Hashes, cleanup, nil
 }
 
 func realMain(configContent, resolversPath, profileDir, protectPath string, listenFd int) int {

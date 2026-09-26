@@ -12,7 +12,7 @@
   "description": "Два протокола в одном модуле: csqtt:// → сервер CSQTT (WIRE-3), qwdtt:// → VPS qWDTT (WG/raw). Общий слой VK-хешей/TURN. Серверы разные.",
   "homepage": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module",
   "updateUrl": "https://raw.githubusercontent.com/MaksBaks92/csqtt-qwdtt-antinet-module/main/antinet-module.json",
-  "version": "0.2.8-dual",
+  "version": "0.2.9-dual",
   "license": "GPL-3.0-or-later (combined helper); CSQTT portions PolyForm-Noncommercial — see NOTICE",
   "handoverMode": "signal",
   "hostEvents": [
@@ -44,7 +44,7 @@
       "type": "enum",
       "label": "Режим хешей VK",
       "default": "manual",
-      "description": "CSQTT-ветка: Ручной / Авто API / Авто ВК. qWDTT пока использует хеши из ссылки + свои режимы VK ниже.",
+      "description": "Ручной / Авто API / Авто ВК. Для qWDTT без hashes= в ссылке — Авто API создаёт свои звонки (нужен вход в VK).",
       "options": [
         {
           "value": "manual",
@@ -52,15 +52,16 @@
         },
         {
           "value": "auto_api",
-          "label": "Авто API (CSQTT)"
+          "label": "Авто API"
         },
         {
           "value": "auto_js",
-          "label": "Авто ВК (CSQTT)"
+          "label": "Авто ВК"
         }
       ],
       "schemes": [
-        "csqtt"
+        "csqtt",
+        "qwdtt"
       ]
     },
     {
@@ -125,7 +126,7 @@
       "type": "enum",
       "label": "Воркеры",
       "default": "18",
-      "description": "Обе схемы (csqtt:// и qwdtt://). Кратно 9. Настройка перекрывает workers= из ссылки.",
+      "description": "Обе схемы. Кратно 9. Если в ссылке есть workers= — берётся он; иначе эта настройка; иначе дефолт.",
       "options": [
         {
           "value": "9",

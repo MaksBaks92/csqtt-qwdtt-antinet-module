@@ -11,9 +11,16 @@ type HostHooks struct {
 	ProtectFromOomKill func()
 }
 
+// AutoHashesFunc — создать VK-хеши звонков, когда в ссылке/настройках их нет
+// (hashMode=auto_api / auto_js). cleanup завершает звонки (calls.forceFinish).
+type AutoHashesFunc func(profileDir, protectPath, moduleState string, workers int, hashMode string) (hashes []string, cleanup func(), err error)
+
 var hooks HostHooks
+var autoHashesFn AutoHashesFunc
 
 func WireHost(h HostHooks) { hooks = h }
+
+func WireAutoHashes(fn AutoHashesFunc) { autoHashesFn = fn }
 
 func emitProgress(format string, args ...any) {
 	if hooks.EmitProgress != nil {

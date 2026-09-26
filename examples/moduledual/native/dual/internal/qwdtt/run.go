@@ -7,6 +7,7 @@ package qwdtt
 // `moduleCall` ниже, больше от модуля ничего не требуется.
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -169,9 +170,53 @@ func Run(configContent, resolversPath, profileDir, protectPath string, listenFd 
 	if err != nil {
 		log.Fatalf("[HELPER] WRAP key: %v", err)
 	}
+	// Число воркеров уходит в транспорт КАК ЕСТЬ: разбивку на группы (ceiling + клампинг последней)
+	// делает `runTransport`, дословно как у автора. Своего округления здесь быть не должно — оно
+	// стояло, роняло запрошенные 16 до 9 (floor к кратному 9) и молчало, то есть ссылка с
+	// `workers=16` поднимала 9 TURN-релеев вместо 16.
+	//
+	// Приоритет: LINK workers= > SETTING_workers (UI) > defaultWorkers (см. parseHelperConfig).
+	numW := cfg.Workers
+	if numW > maxWorkers {
+		log.Printf("[SETTINGS] workers %d -> %d (upper cap)", cfg.Workers, maxWorkers)
+		numW = maxWorkers
+	}
+	if numW <= 0 {
+		numW = defaultWorkers
+	}
+	src := cfg.WorkersSource
+	if src == "" {
+		src = "default"
+	}
+	log.Printf("[SETTINGS] workers=%d (source=%s)", numW, src)
+
 	hashes := ParseHashes(cfg.Hashes)
 	if len(hashes) == 0 {
-		log.Fatal("[HELPER] no VK hashes")
+		if autoHashesFn == nil {
+			log.Fatal("[HELPER] no VK hashes and AutoHashes not wired")
+		}
+		mode := cfg.HashMode
+		if mode == "" || mode == "manual" {
+			mode = "auto_api"
+		}
+		if mode == "auto_js" {
+			log.Printf("[SETTINGS] hashMode auto_js → auto_api (qWDTT has no rust auto_js path)")
+			mode = "auto_api"
+		}
+		log.Printf("[SETTINGS] no hashes in link — creating via %s", mode)
+		emitProgress("%s", "Создаю VK-хеши (Авто API)…")
+		got, cleanup, aerr := autoHashesFn(profileDir, protectPath, cfg.ModuleState, numW, mode)
+		if aerr != nil || len(got) == 0 {
+			if aerr == nil {
+				aerr = fmt.Errorf("empty hash list")
+			}
+			log.Fatalf("[HELPER] VK auto hashes: %v", aerr)
+		}
+		hashes = got
+		if cleanup != nil {
+			defer cleanup()
+		}
+		log.Printf("[SETTINGS] auto hashes: %d (hashMode=%s)", len(hashes), mode)
 	}
 	// Адрес пира зависит от ТРАНСПОРТНОГО РЕЖИМА: у сервера под `rawtun` и под `noDtls` свои
 	// слушатели на своих портах (peerForTransport, helper.go). Подмена стоит ЗДЕСЬ, до резолва,
@@ -185,22 +230,6 @@ func Run(configContent, resolversPath, profileDir, protectPath string, listenFd 
 	peer, err := net.ResolveUDPAddr("udp", peerAddr)
 	if err != nil {
 		log.Fatalf("[HELPER] peer address %q: %v", peerAddr, err)
-	}
-
-	// Число воркеров уходит в транспорт КАК ЕСТЬ: разбивку на группы (ceiling + клампинг последней)
-	// делает `runTransport`, дословно как у автора. Своего округления здесь быть не должно — оно
-	// стояло, роняло запрошенные 16 до 9 (floor к кратному 9) и молчало, то есть ссылка с
-	// `workers=16` поднимала 9 TURN-релеев вместо 16.
-	//
-	// Верхний потолок оставлен: `cfg.Workers` = SETTING_workers > LINK workers= > defaultWorkers
-	// (см. parseHelperConfig); ничем иным число relay-аллокаций не ограничено.
-	numW := cfg.Workers
-	if numW > maxWorkers {
-		log.Printf("[SETTINGS] workers %d -> %d (upper cap)", cfg.Workers, maxWorkers)
-		numW = maxWorkers
-	}
-	if numW <= 0 {
-		numW = defaultWorkers
 	}
 
 	// Локальный UDP-порт — чисто внутрипроцессный IPC (wgconfig.go::forceEndpoint заставляет

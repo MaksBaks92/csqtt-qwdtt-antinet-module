@@ -47,7 +47,10 @@ type helperConfig struct {
 	CaptchaMode string `json:"captchaMode"`     // SETTING_captchaMode (карточка «Модули»): auto/rjs/wv; "" = auto
 	VkAuthMode  string `json:"vkAuthMode"`      // SETTING_vkAuthMode: anonymous/account; "" = anonymous (см. vk_account.go)
 	VkAnonPath  string `json:"vkAnonPath"`      // SETTING_vkAnonPath: vkcalls/legacy; "" = vkcalls (см. vk_account.go)
+	HashMode    string `json:"hashMode"`        // SETTING_hashMode: manual/auto_api/auto_js; "" = manual
 	DnsPreset   string `json:"dnsPreset"`       // SETTING_dnsPreset: yandex/cloudflare/google/doh-cloudflare/doh-google; "" = yandex
+	// WorkersSource — откуда взяли cfg.Workers (для лога): "link" | "setting" | "default".
+	WorkersSource string `json:"-"`
 	// ─── Транспортные режимы, добавленные автором в 1.4.3 (см. TurnParams в group.go) ───
 	// ConnMode повторяет токены апстрима один-в-один (`vpn`/`rawtun`), чтобы настройка читалась
 	// так же, как флаг `-mode` у автора. Третий его токен, `socks`, у нас не настройка и не может
@@ -297,7 +300,8 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 	var cfg helperConfig
 	var link string
 	var settingHashRaw []string
-	var settingWorkers int // SETTING_workers — перекрывает workers= из ссылки (0 = не задано)
+	var settingWorkers int // SETTING_workers — если в ссылке нет workers=
+	var settingHashMode string
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		eq := strings.IndexByte(line, '=')
@@ -320,6 +324,8 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 			cfg.VkAuthMode = v
 		case "SETTING_vkAnonPath":
 			cfg.VkAnonPath = v
+		case "SETTING_hashMode":
+			settingHashMode = v
 		case "SETTING_dnsPreset":
 			cfg.DnsPreset = v
 		case "SETTING_connMode":
@@ -333,7 +339,7 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 		case "SETTING_rawPort":
 			cfg.RawPort, _ = strconv.Atoi(v)
 		case "SETTING_workers":
-			// UI «Воркеры» для обеих схем. Приоритет: SETTING > LINK > defaultWorkers.
+			// UI «Воркеры». Приоритет: LINK workers= > SETTING > default (см. ниже).
 			if w, e := strconv.Atoi(strings.TrimSpace(v)); e == nil && w > 0 {
 				settingWorkers = w
 			}
@@ -377,22 +383,33 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 	if peer == "" {
 		return cfg, fmt.Errorf("LINK missing peer")
 	}
+	cfg.HashMode = vk.NormalizeHashMode(settingHashMode)
 	// Shared VK layer (CSQTT policy): settings hashes + link hashes.
 	settingsMap := map[string]string{"SETTING_vkHashes": strings.Join(settingHashRaw, ",")}
 	merged := vk.CollectHashes(vk.ParseHashList(hashes), settingsMap)
 	if len(merged) == 0 {
-		return cfg, fmt.Errorf("no VK hashes (LINK hashes= or SETTING_vkHash1..4)")
+		// Нет хешей в ссылке/настройках. «Ручной» без материала невозможен — Авто API
+		// (создадим звонки в Run). Явный manual + пустые хеши раньше валил старт целиком.
+		if cfg.HashMode == "manual" {
+			cfg.HashMode = "auto_api"
+		}
+	} else {
+		hashes = strings.Join(merged, ",")
 	}
-	hashes = strings.Join(merged, ",")
-	// Workers: SETTING_workers (UI) > LINK workers=/workersPerHash= > defaultWorkers.
-	// Раньше читали только ссылку — UI «Воркеры» с schemes:["csqtt"] до qWDTT не доезжал.
+	// Workers: LINK workers= > SETTING_workers (UI) > defaultWorkers.
+	// Раньше UI перекрывал ссылку — shared-конфиг с workers=18 поднимал 72 из карточки и ловил
+	// TURN 486 на одном хеше. Явный workers= в ссылке — параметр ЭТОГО сервера.
 	cfg.Workers = defaultWorkers
-	if w, e := strconv.Atoi(qget("workers", "workersPerHash")); e == nil && w > 0 {
-		cfg.Workers = w
-	}
+	cfg.WorkersSource = "default"
 	if settingWorkers > 0 {
 		cfg.Workers = settingWorkers
+		cfg.WorkersSource = "setting"
 	}
+	if w, e := strconv.Atoi(qget("workers", "workersPerHash")); e == nil && w > 0 {
+		cfg.Workers = w
+		cfg.WorkersSource = "link"
+	}
+	cfg.Hashes = hashes
 	// 0 = эфемерный bind (`run.go`: `127.0.0.1:0`), и это ДЕФОЛТ. Раньше здесь
 	// безусловно проставлялся `defaultLocalPort` (9000), из-за чего эфемерная ветка была
 	// мертва, а её собственный комментарий («фиксированный дефолт давал детерминированный

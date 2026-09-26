@@ -139,7 +139,7 @@ func runTransport(ctx context.Context, tp *TurnParams, peer *net.UDPAddr, localC
 	localPort string, numW int, deviceID, connPassword string, stats *Stats,
 	pauseFlag *int32, cfg helperConfig, profileDir string, onWGConfig func(string)) {
 	numGroups := (numW + workersPerGroup - 1) / workersPerGroup
-	log.Printf("[CLIENT] Workers: %d (groups: %d, up to %d each)", numW, numGroups, workersPerGroup)
+	log.Printf("[CLIENT] Workers: %d (groups: %d, up to %d each)", numW, numGroups, workersPerGroup) // source logged in Run as [SETTINGS] workers=…
 
 	// В rawtun диспетчер стартует БЕЗ источника пакетов: адрес/DNS/MTU назначает сервер, и
 	// netstack можно создать только после RAWCONF (см. AttachTUN ниже). У автора причина та же,
