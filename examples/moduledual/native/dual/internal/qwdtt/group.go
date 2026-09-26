@@ -322,6 +322,35 @@ func ParseHashes(raw string) []string {
 	return result
 }
 
+// appendUniqueHashes — дописать extra к base без дублей (нормализация как у ParseHashes).
+func appendUniqueHashes(base, extra []string) []string {
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, h := range base {
+		h = normalizeVKJoinHash(h)
+		if h == "" {
+			continue
+		}
+		if _, ok := seen[h]; ok {
+			continue
+		}
+		seen[h] = struct{}{}
+		out = append(out, h)
+	}
+	for _, h := range extra {
+		h = normalizeVKJoinHash(h)
+		if h == "" {
+			continue
+		}
+		if _, ok := seen[h]; ok {
+			continue
+		}
+		seen[h] = struct{}{}
+		out = append(out, h)
+	}
+	return out
+}
+
 func normalizeVKJoinHash(input string) string {
 	s := strings.Trim(strings.TrimSpace(input), "<>\"'")
 	if s == "" {

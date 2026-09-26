@@ -173,13 +173,30 @@ func hashFromJoinLink(joinLink, okJoinLink string) string {
 	return strings.TrimRight(link, "/")
 }
 
+// maxAutoCallsQwdtt — потолок авто-звонков для qWDTT (1 хеш на группу из 9 воркеров;
+// maxWorkers=108 → 12 групп). Выше CSQTT maxVkHashes=4: у qWDTT слайдер до 72 → 8 хешей.
+const maxAutoCallsQwdtt = 12
+
 func startVkAutoCalls(token string, workers int) (vkAutoStart, error) {
+	return startVkAutoCallsCount(token, callCountForWorkers(workers))
+}
+
+// startVkAutoCallsCount — создать ровно count звонков VK (calls.start).
+// CSQTT считает count через callCountForWorkers (1 хеш ≈ 27 воркеров);
+// qWDTT — 1 хеш на группу из 9 (см. qwdttAutoHashes).
+func startVkAutoCallsCount(token string, count int) (vkAutoStart, error) {
 	var out vkAutoStart
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return out, fmt.Errorf("empty vk token")
 	}
-	out.Requested = callCountForWorkers(workers)
+	if count < 1 {
+		count = 1
+	}
+	if count > maxAutoCallsQwdtt {
+		count = maxAutoCallsQwdtt
+	}
+	out.Requested = count
 	interval := autoCallDelay(out.Requested)
 	nextAt := time.Time{}
 	for slot := 0; slot < out.Requested; slot++ {

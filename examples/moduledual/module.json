@@ -12,7 +12,7 @@
   "description": "Два протокола в одном модуле: csqtt:// → сервер CSQTT (WIRE-3), qwdtt:// → VPS qWDTT (WG/raw). Общий слой VK-хешей/TURN. В UI AntiNet настройки с schemes=[csqtt] видны только у csqtt://, с schemes=[qwdtt] — только у qwdtt://; общие — у обеих. Хеши VK показываются только в режиме «Ручной».",
   "homepage": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module",
   "updateUrl": "https://raw.githubusercontent.com/MaksBaks92/csqtt-qwdtt-antinet-module/main/antinet-module.json",
-  "version": "0.2.11-dual",
+  "version": "0.2.12-dual",
   "license": "GPL-3.0-or-later (combined helper); CSQTT portions PolyForm-Noncommercial — see NOTICE",
   "handoverMode": "signal",
   "hostEvents": [
@@ -47,7 +47,7 @@
       "min": 9,
       "max": 72,
       "step": 9,
-      "description": "Обе схемы. Кратно 9 (группы по 9). Больше — запас по обрывам, выше нагрузка на VK/TURN. Берётся только эта настройка; workers= в ссылке игнорируется.",
+      "description": "Обе схемы. Кратно 9 (группы по 9). Модуль сам добирает VK-хеши под это число: qWDTT — 1 на группу (9), CSQTT — 1 на ~27 воркеров. Берётся только эта настройка; workers= в ссылке игнорируется.",
       "schemes": [
         "csqtt",
         "qwdtt"

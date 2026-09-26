@@ -189,33 +189,53 @@ func Run(configContent, resolversPath, profileDir, protectPath string, listenFd 
 	}
 	log.Printf("[SETTINGS] workers=%d (source=%s)", numW, src)
 
+	// 1 хеш на группу из workersPerGroup воркеров (слайдер 72 → 8 групп → 8 хешей).
+	// Если в ссылке/UI меньше — добираем через Авто API, иначе группы шарят один звонок → TURN 486.
+	needHashes := (numW + workersPerGroup - 1) / workersPerGroup
+	if needHashes < 1 {
+		needHashes = 1
+	}
 	hashes := ParseHashes(cfg.Hashes)
-	if len(hashes) == 0 {
+	log.Printf("[SETTINGS] hashes=%d need=%d (workers=%d, %d/group)", len(hashes), needHashes, numW, workersPerGroup)
+	if len(hashes) < needHashes {
 		if autoHashesFn == nil {
-			log.Fatal("[HELPER] no VK hashes and AutoHashes not wired")
-		}
-		mode := cfg.HashMode
-		if mode == "" || mode == "manual" {
-			mode = "auto_api"
-		}
-		if mode == "auto_js" {
-			log.Printf("[SETTINGS] hashMode auto_js → auto_api (qWDTT has no rust auto_js path)")
-			mode = "auto_api"
-		}
-		log.Printf("[SETTINGS] no hashes in link — creating via %s", mode)
-		emitProgress("%s", "Создаю VK-хеши (Авто API)…")
-		got, cleanup, aerr := autoHashesFn(profileDir, protectPath, cfg.ModuleState, numW, mode)
-		if aerr != nil || len(got) == 0 {
-			if aerr == nil {
-				aerr = fmt.Errorf("empty hash list")
+			if len(hashes) == 0 {
+				log.Fatal("[HELPER] no VK hashes and AutoHashes not wired")
 			}
-			log.Fatalf("[HELPER] VK auto hashes: %v", aerr)
+			log.Printf("[SETTINGS] AutoHashes not wired — continuing with %d hashes (groups will share)", len(hashes))
+		} else {
+			mode := cfg.HashMode
+			if mode == "" || mode == "manual" {
+				mode = "auto_api"
+			}
+			if mode == "auto_js" {
+				log.Printf("[SETTINGS] hashMode auto_js → auto_api (qWDTT has no rust auto_js path)")
+				mode = "auto_api"
+			}
+			want := needHashes - len(hashes)
+			if len(hashes) == 0 {
+				log.Printf("[SETTINGS] no hashes — creating %d via %s", want, mode)
+			} else {
+				log.Printf("[SETTINGS] topping up hashes %d→%d via %s (+%d)", len(hashes), needHashes, mode, want)
+			}
+			emitProgress("%s", "Создаю VK-хеши (Авто API)…")
+			got, cleanup, aerr := autoHashesFn(profileDir, protectPath, cfg.ModuleState, want, mode)
+			if aerr != nil || len(got) == 0 {
+				if aerr == nil {
+					aerr = fmt.Errorf("empty hash list")
+				}
+				if len(hashes) == 0 {
+					log.Fatalf("[HELPER] VK auto hashes: %v", aerr)
+				}
+				log.Printf("[SETTINGS] auto hash top-up failed (%v) — continuing with %d hashes", aerr, len(hashes))
+			} else {
+				hashes = appendUniqueHashes(hashes, got)
+				if cleanup != nil {
+					defer cleanup()
+				}
+				log.Printf("[SETTINGS] hashes after auto: %d (created=%d, hashMode=%s)", len(hashes), len(got), mode)
+			}
 		}
-		hashes = got
-		if cleanup != nil {
-			defer cleanup()
-		}
-		log.Printf("[SETTINGS] auto hashes: %d (hashMode=%s)", len(hashes), mode)
 	}
 	// Адрес пира зависит от ТРАНСПОРТНОГО РЕЖИМА: у сервера под `rawtun` и под `noDtls` свои
 	// слушатели на своих портах (peerForTransport, helper.go). Подмена стоит ЗДЕСЬ, до резолва,

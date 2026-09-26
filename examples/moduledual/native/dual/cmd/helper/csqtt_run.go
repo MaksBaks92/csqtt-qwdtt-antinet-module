@@ -513,6 +513,65 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 		persistState()
 	}
 
+	// Добор хешей под SETTING_workers (как у qWDTT). CSQTT: 1 хеш ≈ 3×9 = 27 воркеров
+	// (callCountForWorkers). Если в ссылке/полях меньше — Авто API; иначе движок шарит слоты.
+	needHashes := callCountForWorkers(workers)
+	emitLog("CSQTT: workers=%d · hashes=%d · need=%d", workers, len(hashes), needHashes)
+	// auto_js с пустым списком: звонки создаёт rust-движок — не дублируем calls.start здесь.
+	if len(hashes) < needHashes && !(hashMode == "auto_js" && len(hashes) == 0) {
+		if vkToken == "" {
+			tok, terr := ensureVkToken(cfg["MODULE_STATE"], profileDir, s, resolver)
+			if terr != nil {
+				if len(hashes) == 0 {
+					emitLog(s.vkLoginFailedFmt, terr)
+					emitStatus(statusFatal, "vk login failed")
+					log.Fatalf("vk token: %v", terr)
+				}
+				emitLog("CSQTT: не хватает хешей (%d/%d), вход в VK не удался (%v) — распределение по имеющимся", len(hashes), needHashes, terr)
+				allowRedistrib = true
+			} else {
+				vkToken = tok
+			}
+		}
+		if vkToken != "" && len(hashes) < needHashes {
+			want := needHashes - len(hashes)
+			emitLog("CSQTT: добор хешей %d→%d (+%d)", len(hashes), needHashes, want)
+			emitProgress("%s", s.vkAutoAPIProgress)
+			started, aerr := startVkAutoCallsCount(vkToken, want)
+			if errors.Is(aerr, errVkTokenInvalid) {
+				saveVkToken("")
+				emitProgress("%s", s.vkLoginProgress)
+				fresh, ferr := requestVkAccessToken(profileDir)
+				if ferr != nil {
+					aerr = ferr
+				} else {
+					vkToken = fresh
+					saveVkToken(vkToken)
+					started, aerr = startVkAutoCallsCount(vkToken, want)
+				}
+			}
+			if aerr != nil || len(started.Hashes) == 0 {
+				if aerr == nil {
+					aerr = fmt.Errorf("empty hash list")
+				}
+				if len(hashes) == 0 {
+					emitLog(s.vkAutoAPIFailedFmt, aerr)
+					emitStatus(statusFatal, "vk auto api failed")
+					log.Fatalf("vk auto api: %v", aerr)
+				}
+				emitLog("CSQTT: добор хешей не удался (%v) — распределение по %d", aerr, len(hashes))
+				allowRedistrib = true
+			} else {
+				hashes = uniqHashes(append(hashes, started.Hashes...))
+				defer finishVkAutoCalls(vkToken, started.Calls)
+				emitLog("CSQTT: хешей после добора: %d (создано %d)", len(hashes), len(started.Hashes))
+				if len(hashes) < needHashes {
+					allowRedistrib = true
+				}
+			}
+		}
+	}
+
 	// Engine off-TUN CONNECT proxy only AFTER token/hashes are ready.
 	proxyURL, stopProxy, perr := startProtectHTTPProxy(protectPath, resolver)
 	if perr != nil {

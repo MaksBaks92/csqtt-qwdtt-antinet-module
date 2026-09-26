@@ -73,8 +73,9 @@ func wireQwdtt() {
 	qwdtt.WireAutoHashes(qwdttAutoHashes)
 }
 
-// qwdttAutoHashes — тот же Авто API, что у CSQTT (calls.start), когда в qwdtt-ссылке нет hashes=.
-func qwdttAutoHashes(profileDir, protectPath, moduleState string, workers int, hashMode string) ([]string, func(), error) {
+// qwdttAutoHashes — Авто API (calls.start) для добора хешей под группы qWDTT.
+// wantHashes — сколько звонков создать (1 хеш ≈ 1 группа из 9 воркеров), не CSQTT-формула.
+func qwdttAutoHashes(profileDir, protectPath, moduleState string, wantHashes int, hashMode string) ([]string, func(), error) {
 	_ = hashMode // уже нормализован в Run (auto_api); auto_js сюда не доходит
 	resolver := newProtectedResolver("", protectPath)
 	configureVkHTTP(protectPath, resolver)
@@ -84,7 +85,7 @@ func qwdttAutoHashes(profileDir, protectPath, moduleState string, workers int, h
 		return nil, nil, terr
 	}
 	emitProgress("%s", s.vkAutoAPIProgress)
-	started, aerr := startVkAutoCalls(tok, workers)
+	started, aerr := startVkAutoCallsCount(tok, wantHashes)
 	if aerr != nil || len(started.Hashes) == 0 {
 		if aerr == nil {
 			aerr = fmt.Errorf("empty hash list")
