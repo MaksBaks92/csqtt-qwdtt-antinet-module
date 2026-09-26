@@ -439,18 +439,18 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 	allowRedistrib := false
 	var hashes []string
 	seedHashes := uniqHashes(append(collectManualHashes(cfg, link.Hashes), persisted.ManualHashes...))
-	// Авто-хеши из MODULE_STATE — до OAuth: иначе каждый connect снова лезет в VK.
+	needHashes := callCountForWorkers(workers)
+	// Авто-хеши из MODULE_STATE — до OAuth, если уже хватает на workers.
 	if hashMode == "auto_api" {
 		if cached, ok := takeCachedAutoHashes(); ok {
 			hashes = cached
-			allowRedistrib = true
 			left := autoHashesTTL - time.Since(time.Unix(persisted.AutoHashesAt, 0))
-			emitLog("CSQTT: auto hashes cache hit · %d · TTL left %s — no OAuth/calls.start", len(hashes), left.Truncate(time.Second))
+			emitLog("CSQTT: auto hashes cache hit · %d · need=%d · TTL left %s", len(hashes), needHashes, left.Truncate(time.Second))
 		}
 	}
-	// Token FIRST (native CSQTT order): login → remixsid → scrape → save. Engine/SOCKS later.
-	// С валидным кешем auto_api + vkcalls токен не нужен (calls.start не будет).
-	needOAuth := needsVkOAuth(hashMode, authMode) && !(hashMode == "auto_api" && len(hashes) > 0 && authMode != "auto_js")
+	// Token FIRST. OAuth не нужен, если auto_api-кеш уже покрывает needHashes и креды не auto_js.
+	needOAuth := needsVkOAuth(hashMode, authMode) &&
+		!(hashMode == "auto_api" && len(hashes) >= needHashes && authMode != "auto_js")
 	if needOAuth {
 		tok, terr := ensureVkToken(cfg["MODULE_STATE"], profileDir, s, resolver)
 		if terr != nil {
@@ -465,7 +465,6 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 				hashMode = "manual"
 				authMode = "vkcalls"
 				hashes = cached
-				allowRedistrib = true
 			} else {
 				emitLog(s.vkLoginFailedFmt, terr)
 				emitStatus(statusFatal, "vk login failed")
@@ -522,7 +521,6 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 					}
 				} else {
 					hashes = started.Hashes
-					allowRedistrib = started.needsRedistribution()
 					storeAutoHashes(started)
 					// Не forceFinish на стопе — хеши в MODULE_STATE до TTL.
 				}
@@ -553,14 +551,56 @@ func csqttRun(configContent, resolversPath, profileDir, protectPath string, list
 		persistState()
 	}
 
-	// CSQTT: 1 хеш ≈ 3×9 = 27 воркеров (callCountForWorkers). Как в оригинале —
-	// hashes= в ссылке/полях живут долго; добор calls.start только если хешей нет
-	// вовсе (не каждый connect). Иначе движок шарит слоты (allowRedistrib).
-	needHashes := callCountForWorkers(workers)
+	// CSQTT: 1 хеш ≈ 3×9 = 27 воркеров / ≈ один VK TURN-аллокатор (~2–3 Мбит на поток,
+	// суммарно часто ~30–40 Мбит на звонок). Недобор хешей → шаринг → потолок скорости.
+	// Добор calls.start только недостающих (не каждый connect, если need уже покрыт).
 	emitLog("CSQTT: workers=%d · hashes=%d · need=%d", workers, len(hashes), needHashes)
+	if hashMode == "auto_api" && len(hashes) > 0 && len(hashes) < needHashes {
+		missing := needHashes - len(hashes)
+		if room := maxVkHashes - len(hashes); room < missing {
+			missing = room
+		}
+		if missing > 0 {
+			emitLog("CSQTT: добор хешей %d→%d (нехватка %d) — иначе потолок VK Calls ~35 Мбит", len(hashes), needHashes, missing)
+			if vkToken == "" {
+				tok, terr := ensureVkToken(cfg["MODULE_STATE"], profileDir, s, resolver)
+				if terr != nil {
+					emitLog("CSQTT: добор хешей без токена (%v) — оставляю %d, allowRedistrib", terr, len(hashes))
+				} else {
+					vkToken = tok
+				}
+			}
+			if vkToken != "" {
+				emitProgress("%s", s.vkAutoAPIProgress)
+				started, aerr := startVkAutoCallsCount(vkToken, missing)
+				if errors.Is(aerr, errVkTokenInvalid) {
+					saveVkToken("")
+					fresh, ferr := requestVkAccessToken(profileDir)
+					if ferr == nil {
+						vkToken = fresh
+						saveVkToken(vkToken)
+						started, aerr = startVkAutoCallsCount(vkToken, missing)
+					}
+				}
+				if aerr == nil && len(started.Hashes) > 0 {
+					hashes = uniqHashes(append(hashes, started.Hashes...))
+					if len(hashes) > maxVkHashes {
+						hashes = hashes[:maxVkHashes]
+					}
+					appendAutoHashes(started)
+					emitLog("CSQTT: хеши после добора=%d", len(hashes))
+				} else if aerr != nil {
+					emitLog("CSQTT: добор хешей не удался (%v)", aerr)
+				}
+			}
+		}
+	}
 	if len(hashes) > 0 && len(hashes) < needHashes {
-		emitLog("CSQTT: soft-skip top-up: %d hashes present (need=%d) — groups share; no OAuth/calls.start", len(hashes), needHashes)
 		allowRedistrib = true
+		// Грубая оценка: ~2 Мбит/воркер на общем аллокаторе → видимый потолок.
+		estMbps := len(hashes) * 35
+		emitLog("CSQTT: soft-share %d hashes for %d workers (need=%d) — ожидаемый потолок ~%d Мбит; поднимите хеши (Авто API) или снизьте воркеры",
+			len(hashes), workers, needHashes, estMbps)
 	}
 
 	// Engine off-TUN CONNECT proxy only AFTER token/hashes are ready.
@@ -1067,6 +1107,20 @@ func storeAutoHashes(started vkAutoStart) {
 	}
 	persisted.AutoCallIDs = ids
 	persisted.AutoHashesAt = time.Now().Unix()
+	persistState()
+}
+
+// appendAutoHashes — дописать новые авто-звонки к кешу (добор под workers), TTL не сбрасываем.
+func appendAutoHashes(started vkAutoStart) {
+	persisted.AutoHashes = uniqHashes(append(persisted.AutoHashes, started.Hashes...))
+	for _, c := range started.Calls {
+		if id := strings.TrimSpace(c.CallID); id != "" {
+			persisted.AutoCallIDs = append(persisted.AutoCallIDs, id)
+		}
+	}
+	if persisted.AutoHashesAt <= 0 {
+		persisted.AutoHashesAt = time.Now().Unix()
+	}
 	persistState()
 }
 

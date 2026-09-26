@@ -12,7 +12,7 @@
   "description": "Два протокола в одном модуле: csqtt:// и qwdtt://. Общие только таймаут и Device ID; всё остальное — в раскрываемых блоках CSQTT и qWDTT без пересечений.",
   "homepage": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module",
   "updateUrl": "https://raw.githubusercontent.com/MaksBaks92/csqtt-qwdtt-antinet-module/main/antinet-module.json",
-  "version": "0.2.17-dual",
+  "version": "0.2.19-dual",
   "license": "GPL-3.0-or-later (combined helper); CSQTT portions PolyForm-Noncommercial — see NOTICE",
   "handoverMode": "signal",
   "hostEvents": [
@@ -71,8 +71,8 @@
       "key": "csqttHashMode",
       "type": "enum",
       "label": "Режим хешей CSQTT",
-      "default": "manual",
-      "description": "Ручной / Авто API / Авто ВК — только для csqtt://.",
+      "default": "auto_api",
+      "description": "Ручной — поля хешей ниже. Авто API / Авто ВК — helper создаёт звонки сам.",
       "options": [
         { "value": "manual", "label": "Ручной" },
         { "value": "auto_api", "label": "Авто API" },
@@ -88,10 +88,10 @@
       "type": "string",
       "label": "CSQTT VK-хеш 1",
       "default": "",
-      "description": "Только режим «Ручной». Ссылка vk.com/call/join/… или хеш.",
+      "description": "Ссылка vk.com/call/join/… или хеш.",
       "visibleWhen": {
-        "key": "panelCsqtt",
-        "in": ["true"]
+        "key": "csqttHashMode",
+        "in": ["manual"]
       }
     },
     {
@@ -99,10 +99,10 @@
       "type": "string",
       "label": "CSQTT VK-хеш 2",
       "default": "",
-      "description": "Необязательно (режим «Ручной»).",
+      "description": "Необязательно.",
       "visibleWhen": {
-        "key": "panelCsqtt",
-        "in": ["true"]
+        "key": "csqttHashMode",
+        "in": ["manual"]
       }
     },
     {
@@ -110,10 +110,10 @@
       "type": "string",
       "label": "CSQTT VK-хеш 3",
       "default": "",
-      "description": "Необязательно (режим «Ручной»).",
+      "description": "Необязательно.",
       "visibleWhen": {
-        "key": "panelCsqtt",
-        "in": ["true"]
+        "key": "csqttHashMode",
+        "in": ["manual"]
       }
     },
     {
@@ -121,10 +121,10 @@
       "type": "string",
       "label": "CSQTT VK-хеш 4",
       "default": "",
-      "description": "Необязательно (режим «Ручной»).",
+      "description": "Необязательно.",
       "visibleWhen": {
-        "key": "panelCsqtt",
-        "in": ["true"]
+        "key": "csqttHashMode",
+        "in": ["manual"]
       }
     },
     {
@@ -246,8 +246,8 @@
       "key": "qwdttHashMode",
       "type": "enum",
       "label": "Режим хешей qWDTT",
-      "default": "manual",
-      "description": "Ручной / Авто API — только для qwdtt://. Авто ВК мапится в Авто API.",
+      "default": "auto_api",
+      "description": "Ручной — поля хешей ниже. Авто API — helper создаёт звонки сам. Авто ВК мапится в Авто API.",
       "options": [
         { "value": "manual", "label": "Ручной" },
         { "value": "auto_api", "label": "Авто API" },
@@ -263,10 +263,10 @@
       "type": "string",
       "label": "qWDTT VK-хеш 1",
       "default": "",
-      "description": "Только режим «Ручной». Ссылка vk.com/call/join/… или хеш.",
+      "description": "Ссылка vk.com/call/join/… или хеш.",
       "visibleWhen": {
-        "key": "panelQwdtt",
-        "in": ["true"]
+        "key": "qwdttHashMode",
+        "in": ["manual"]
       }
     },
     {
@@ -274,10 +274,10 @@
       "type": "string",
       "label": "qWDTT VK-хеш 2",
       "default": "",
-      "description": "Необязательно (режим «Ручной»).",
+      "description": "Необязательно.",
       "visibleWhen": {
-        "key": "panelQwdtt",
-        "in": ["true"]
+        "key": "qwdttHashMode",
+        "in": ["manual"]
       }
     },
     {
@@ -285,10 +285,10 @@
       "type": "string",
       "label": "qWDTT VK-хеш 3",
       "default": "",
-      "description": "Необязательно (режим «Ручной»).",
+      "description": "Необязательно.",
       "visibleWhen": {
-        "key": "panelQwdtt",
-        "in": ["true"]
+        "key": "qwdttHashMode",
+        "in": ["manual"]
       }
     },
     {
@@ -296,10 +296,10 @@
       "type": "string",
       "label": "qWDTT VK-хеш 4",
       "default": "",
-      "description": "Необязательно (режим «Ручной»).",
+      "description": "Необязательно.",
       "visibleWhen": {
-        "key": "panelQwdtt",
-        "in": ["true"]
+        "key": "qwdttHashMode",
+        "in": ["manual"]
       }
     },
     {
