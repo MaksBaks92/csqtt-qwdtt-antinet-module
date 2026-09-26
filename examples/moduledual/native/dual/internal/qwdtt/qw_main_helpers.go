@@ -134,7 +134,7 @@ func sanitizeHashCheckMessage(message string) string {
 //
 // Разбивка на группы — ceiling-деление + per-group startIdx/endIdx/groupSize clamping, дословно как
 // у автора (его main.go). Раньше здесь стоял расчёт по готовому numGroups, а вызывающий сам ронял
-// число воркеров до кратного 9 — и `workers=16` из ссылки поднимало 9 релеев вместо 16, молча.
+// число воркеров до кратного 9 — и workers=16 из настроек поднимало 9 релеев вместо 16, молча.
 func runTransport(ctx context.Context, tp *TurnParams, peer *net.UDPAddr, localConn net.PacketConn,
 	localPort string, numW int, deviceID, connPassword string, stats *Stats,
 	pauseFlag *int32, cfg helperConfig, profileDir string, onWGConfig func(string)) {

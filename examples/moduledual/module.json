@@ -9,10 +9,10 @@
     "qWDTT"
   ],
   "name": "CSQTT / qWDTT",
-  "description": "Два протокола в одном модуле: csqtt:// → сервер CSQTT (WIRE-3), qwdtt:// → VPS qWDTT (WG/raw). Общий слой VK-хешей/TURN. Серверы разные.",
+  "description": "Два протокола в одном модуле: csqtt:// → сервер CSQTT (WIRE-3), qwdtt:// → VPS qWDTT (WG/raw). Общий слой VK-хешей/TURN. В UI AntiNet настройки с schemes=[csqtt] видны только у csqtt://, с schemes=[qwdtt] — только у qwdtt://; общие — у обеих. Хеши VK показываются только в режиме «Ручной».",
   "homepage": "https://github.com/MaksBaks92/csqtt-qwdtt-antinet-module",
   "updateUrl": "https://raw.githubusercontent.com/MaksBaks92/csqtt-qwdtt-antinet-module/main/antinet-module.json",
-  "version": "0.2.9-dual",
+  "version": "0.2.11-dual",
   "license": "GPL-3.0-or-later (combined helper); CSQTT portions PolyForm-Noncommercial — see NOTICE",
   "handoverMode": "signal",
   "hostEvents": [
@@ -40,11 +40,25 @@
       "description": "Потолок dial до цели внутри туннеля (обе схемы)."
     },
     {
+      "key": "workers",
+      "type": "slider",
+      "label": "Число TURN-воркеров",
+      "default": 18,
+      "min": 9,
+      "max": 72,
+      "step": 9,
+      "description": "Обе схемы. Кратно 9 (группы по 9). Больше — запас по обрывам, выше нагрузка на VK/TURN. Берётся только эта настройка; workers= в ссылке игнорируется.",
+      "schemes": [
+        "csqtt",
+        "qwdtt"
+      ]
+    },
+    {
       "key": "hashMode",
       "type": "enum",
       "label": "Режим хешей VK",
       "default": "manual",
-      "description": "Ручной / Авто API / Авто ВК. Для qWDTT без hashes= в ссылке — Авто API создаёт свои звонки (нужен вход в VK).",
+      "description": "Ручной — поля хешей ниже. Авто API / Авто ВК — helper создаёт звонки сам (поля хешей скрыты). Для qWDTT без hashes= в ссылке — Авто API создаёт свои звонки (нужен вход в VK).",
       "options": [
         {
           "value": "manual",
@@ -59,6 +73,74 @@
           "label": "Авто ВК"
         }
       ],
+      "schemes": [
+        "csqtt",
+        "qwdtt"
+      ]
+    },
+    {
+      "key": "vkHash1",
+      "type": "string",
+      "label": "VK-хеш 1",
+      "default": "",
+      "description": "Ссылка vk.com/call/join/… или сам хеш. Для CSQTT (hashMode=manual) и запасной для qWDTT.",
+      "visibleWhen": {
+        "key": "hashMode",
+        "in": [
+          "manual"
+        ]
+      },
+      "schemes": [
+        "csqtt",
+        "qwdtt"
+      ]
+    },
+    {
+      "key": "vkHash2",
+      "type": "string",
+      "label": "VK-хеш 2",
+      "default": "",
+      "description": "Необязательно.",
+      "visibleWhen": {
+        "key": "hashMode",
+        "in": [
+          "manual"
+        ]
+      },
+      "schemes": [
+        "csqtt",
+        "qwdtt"
+      ]
+    },
+    {
+      "key": "vkHash3",
+      "type": "string",
+      "label": "VK-хеш 3",
+      "default": "",
+      "description": "Необязательно.",
+      "visibleWhen": {
+        "key": "hashMode",
+        "in": [
+          "manual"
+        ]
+      },
+      "schemes": [
+        "csqtt",
+        "qwdtt"
+      ]
+    },
+    {
+      "key": "vkHash4",
+      "type": "string",
+      "label": "VK-хеш 4",
+      "default": "",
+      "description": "Необязательно.",
+      "visibleWhen": {
+        "key": "hashMode",
+        "in": [
+          "manual"
+        ]
+      },
       "schemes": [
         "csqtt",
         "qwdtt"
@@ -94,69 +176,18 @@
       ]
     },
     {
-      "key": "vkHash1",
+      "key": "deviceId",
       "type": "string",
-      "label": "VK-хеш 1",
+      "label": "Device ID",
       "default": "",
-      "description": "Для CSQTT (hashMode=manual) и запасной для qWDTT."
+      "description": "Пусто — HWID AntiNet. Общий для привязки пароля на серверах."
     },
     {
-      "key": "vkHash2",
-      "type": "string",
-      "label": "VK-хеш 2",
-      "default": "",
-      "description": "Необязательно."
-    },
-    {
-      "key": "vkHash3",
-      "type": "string",
-      "label": "VK-хеш 3",
-      "default": "",
-      "description": "Необязательно."
-    },
-    {
-      "key": "vkHash4",
-      "type": "string",
-      "label": "VK-хеш 4",
-      "default": "",
-      "description": "Необязательно."
-    },
-    {
-      "key": "workers",
-      "type": "enum",
-      "label": "Воркеры",
-      "default": "18",
-      "description": "Обе схемы. Кратно 9. Если в ссылке есть workers= — берётся он; иначе эта настройка; иначе дефолт.",
-      "options": [
-        {
-          "value": "9",
-          "label": "9 (1 хеш)"
-        },
-        {
-          "value": "18",
-          "label": "18 (2 хеша)"
-        },
-        {
-          "value": "27",
-          "label": "27 (3 хеша)"
-        },
-        {
-          "value": "36",
-          "label": "36 (4 хеша)"
-        },
-        {
-          "value": "54",
-          "label": "54 (6 хешей)"
-        },
-        {
-          "value": "72",
-          "label": "72 (8 хешей)"
-        }
-      ],
-      "schemes": [
-        "csqtt",
-        "qwdtt"
-      ]
+      "key": "debugLog",
+      "type": "bool",
+      "label": "Подробный лог",
+      "default": false,
+      "description": "Диагностика (в основном CSQTT gVisor/bridge)."
     },
     {
       "key": "idleWorkers",
@@ -233,18 +264,11 @@
       ]
     },
     {
-      "key": "deviceId",
-      "type": "string",
-      "label": "Device ID",
-      "default": "",
-      "description": "Пусто — HWID AntiNet. Общий для привязки пароля на серверах."
-    },
-    {
       "key": "captchaMode",
       "type": "enum",
       "label": "Капча VK (qWDTT)",
       "default": "auto",
-      "description": "В основном qwdtt://; CSQTT капча идёт через свой путь.",
+      "description": "Только qwdtt://.",
       "options": [
         {
           "value": "auto",
@@ -363,6 +387,12 @@
       "min": 1,
       "max": 65535,
       "description": "Только если «Без DTLS».",
+      "visibleWhen": {
+        "key": "noDtls",
+        "in": [
+          "true"
+        ]
+      },
       "schemes": [
         "qwdtt"
       ]
@@ -375,16 +405,15 @@
       "min": 1,
       "max": 65535,
       "description": "Только режим Raw IP.",
+      "visibleWhen": {
+        "key": "connMode",
+        "in": [
+          "rawtun"
+        ]
+      },
       "schemes": [
         "qwdtt"
       ]
-    },
-    {
-      "key": "debugLog",
-      "type": "bool",
-      "label": "Подробный лог",
-      "default": false,
-      "description": "Диагностика (в основном CSQTT gVisor/bridge)."
     }
   ],
   "helperBinary": {

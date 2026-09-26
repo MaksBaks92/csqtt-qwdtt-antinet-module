@@ -172,10 +172,9 @@ func Run(configContent, resolversPath, profileDir, protectPath string, listenFd 
 	}
 	// Число воркеров уходит в транспорт КАК ЕСТЬ: разбивку на группы (ceiling + клампинг последней)
 	// делает `runTransport`, дословно как у автора. Своего округления здесь быть не должно — оно
-	// стояло, роняло запрошенные 16 до 9 (floor к кратному 9) и молчало, то есть ссылка с
-	// `workers=16` поднимала 9 TURN-релеев вместо 16.
+	// стояло и молча роняло запрошенные 16 до 9 (floor к кратному 9).
 	//
-	// Приоритет: LINK workers= > SETTING_workers (UI) > defaultWorkers (см. parseHelperConfig).
+	// Приоритет: SETTING_workers (UI) > defaultWorkers; workers= в ссылке игнорируется.
 	numW := cfg.Workers
 	if numW > maxWorkers {
 		log.Printf("[SETTINGS] workers %d -> %d (upper cap)", cfg.Workers, maxWorkers)

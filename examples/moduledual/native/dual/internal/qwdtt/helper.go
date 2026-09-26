@@ -49,7 +49,7 @@ type helperConfig struct {
 	VkAnonPath  string `json:"vkAnonPath"`      // SETTING_vkAnonPath: vkcalls/legacy; "" = vkcalls (см. vk_account.go)
 	HashMode    string `json:"hashMode"`        // SETTING_hashMode: manual/auto_api/auto_js; "" = manual
 	DnsPreset   string `json:"dnsPreset"`       // SETTING_dnsPreset: yandex/cloudflare/google/doh-cloudflare/doh-google; "" = yandex
-	// WorkersSource — откуда взяли cfg.Workers (для лога): "link" | "setting" | "default".
+	// WorkersSource — откуда взяли cfg.Workers (для лога): "setting" | "default".
 	WorkersSource string `json:"-"`
 	// ─── Транспортные режимы, добавленные автором в 1.4.3 (см. TurnParams в group.go) ───
 	// ConnMode повторяет токены апстрима один-в-один (`vpn`/`rawtun`), чтобы настройка читалась
@@ -97,7 +97,7 @@ const (
 	defaultDirectPort = 56002
 	defaultRawPort    = 56003
 	defaultLocalPort = 9000
-	// Дефолт при отсутствии `workers=` в ссылке — авторский дефолт CLI (`flag.Int("n", 9, …)`).
+	// Дефолт при отсутствии SETTING_workers — авторский дефолт CLI (`flag.Int("n", 9, …)`).
 	// Число НЕ обязано быть кратным `workersPerGroup`: разбивку делает runTransport ceiling-делением
 	// с клампингом последней группы, как у автора.
 	defaultWorkers = 9
@@ -300,7 +300,7 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 	var cfg helperConfig
 	var link string
 	var settingHashRaw []string
-	var settingWorkers int // SETTING_workers — если в ссылке нет workers=
+	var settingWorkers int // SETTING_workers — единственный источник числа воркеров (UI)
 	var settingHashMode string
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
@@ -339,7 +339,7 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 		case "SETTING_rawPort":
 			cfg.RawPort, _ = strconv.Atoi(v)
 		case "SETTING_workers":
-			// UI «Воркеры». Приоритет: LINK workers= > SETTING > default (см. ниже).
+			// UI «Воркеры». workers= в ссылке игнорируется (см. ниже).
 			if w, e := strconv.Atoi(strings.TrimSpace(v)); e == nil && w > 0 {
 				settingWorkers = w
 			}
@@ -396,18 +396,14 @@ func parseHelperConfig(raw string) (helperConfig, error) {
 	} else {
 		hashes = strings.Join(merged, ",")
 	}
-	// Workers: LINK workers= > SETTING_workers (UI) > defaultWorkers.
-	// Раньше UI перекрывал ссылку — shared-конфиг с workers=18 поднимал 72 из карточки и ловил
-	// TURN 486 на одном хеше. Явный workers= в ссылке — параметр ЭТОГО сервера.
+	// Workers: только SETTING_workers (UI) > defaultWorkers.
+	// workers= / workersPerHash в ссылке намеренно игнорируются — иначе shared-линк
+	// с workers=18 перекрывал слайдер 72 в карточке.
 	cfg.Workers = defaultWorkers
 	cfg.WorkersSource = "default"
 	if settingWorkers > 0 {
 		cfg.Workers = settingWorkers
 		cfg.WorkersSource = "setting"
-	}
-	if w, e := strconv.Atoi(qget("workers", "workersPerHash")); e == nil && w > 0 {
-		cfg.Workers = w
-		cfg.WorkersSource = "link"
 	}
 	cfg.Hashes = hashes
 	// 0 = эфемерный bind (`run.go`: `127.0.0.1:0`), и это ДЕФОЛТ. Раньше здесь
